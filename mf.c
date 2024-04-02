@@ -15,9 +15,9 @@
 #define MF_ERROR -1
 
 typedef struct {
-    int mq_count; // Oluşturulan mesaj kuyruğu sayısı
-    // Diğer gerekli meta veriler...
-} SharedMemoryMeta;
+    int mq_count;
+    //mq_array
+} FixedPortion;
 
 typedef struct {
     char shmem_name[MAXFILENAME];
@@ -26,13 +26,13 @@ typedef struct {
     int max_queues_in_shmem;
 } ConfigParams;
 
+
 //Global de yapabiliriz bence sorun yok ikisi de okey
 void *shmem = NULL;
 ConfigParams config;
 
 static ConfigParams read_config(const char* filename);
 static void* create_shared_memory(const char* name, size_t size);
-static int setup_synchronization_objects(SharedMemoryMeta* layout, ConfigParams config);
 
 int mf_init() {
     config = read_config(CONFIG_FILENAME);
@@ -138,10 +138,13 @@ static ConfigParams read_config(const char* filename) {
         return config;
     }
 
-    char line[256];
+    char line[256], temp_shmem_name[256];;
     while (fgets(line, sizeof(line), file)) {
         if (line[0] == '#') continue;
-        if (sscanf(line, "SHMEM_NAME %s", config.shmem_name) == 1) continue;
+        if (sscanf(line, "SHMEM_NAME \"%255[^\"]\"", temp_shmem_name) == 1) {
+            strcpy(config.shmem_name, temp_shmem_name);
+            continue;
+        }
         if (sscanf(line, "SHMEM_SIZE %zu", &config.shmem_size) == 1) continue;
         if (sscanf(line, "MAX_MSGS_IN_QUEUE %d", &config.max_msgs_in_queue) == 1) continue;
         if (sscanf(line, "MAX_QUEUES_IN_SHMEM %d", &config.max_queues_in_shmem) == 1) continue;
@@ -155,6 +158,7 @@ static ConfigParams read_config(const char* filename) {
 }
 
 static void* create_shared_memory(const char* name, size_t size) {
+    printf("name: %s", name);
     int shm_fd = shm_open(name, O_CREAT | O_RDWR, 0666);
     if (shm_fd == -1) {
         perror("shm_open");
@@ -174,17 +178,5 @@ static void* create_shared_memory(const char* name, size_t size) {
     return addr;
 }
 
-static int setup_synchronization_objects(SharedMemoryMeta* layout, ConfigParams config) {
-    for (int i = 0; i < config.max_queues_in_shmem; i++) {
-        char sem_name[256];
-        sprintf(sem_name, "/sem_queue_%d", i);
-        sem_t* sem = sem_open(sem_name, O_CREAT, 0666, 1);
-        if (sem == SEM_FAILED) {
-            perror("sem_open");
-            return -1;
-        }
-    }
-    return 0;
-}
 
 

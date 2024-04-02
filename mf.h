@@ -8,7 +8,7 @@
 
 // min and max msg length
 #define MIN_DATALEN 1 // byte
-#define MAX_DATALEN 4096 // bytes
+#define MAX_DATALEN 4096 // bytes [x, y, z]
 // min and max message size (data length)
 
 // min and max queue size
