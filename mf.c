@@ -17,6 +17,7 @@
 typedef struct {
     int mq_count;
     //mq_array
+    //config params
 } FixedPortion;
 
 typedef struct {
@@ -25,7 +26,6 @@ typedef struct {
     int max_msgs_in_queue;
     int max_queues_in_shmem;
 } ConfigParams;
-
 
 //Global de yapabiliriz bence sorun yok ikisi de okey
 void *shmem = NULL;
@@ -38,16 +38,6 @@ int mf_init() {
     config = read_config(CONFIG_FILENAME);
     shmem = create_shared_memory(config.shmem_name, config.shmem_size);
     if (!shmem) {
-        return MF_ERROR;
-    }
-    
-    //BU SHAREDMEMORYMETA KISMINA BİRLİKTE BAKALIM
-    SharedMemoryMeta* meta = (SharedMemoryMeta*)shmem;
-    meta->mq_count = 0;
-
-    // Senkronizasyon objelerini kur
-    if (setup_synchronization_objects(meta, config) != 0) {
-        munmap(shmem, config.shmem_size);
         return MF_ERROR;
     }
 
