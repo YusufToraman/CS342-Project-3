@@ -13,11 +13,12 @@
 int qid = 0;
 
 typedef struct {
-    Message* messages;  // Mesajlar için pointer dizisi.
-    size_t head;        // Kuyruğun başı.
-    size_t tail;        // Kuyruğun sonu.
-    size_t capacity;    // Kuyruk kapasitesi (mesaj sayısı olarak).
-    size_t count;       // Kuyruktaki mevcut mesaj sayısı.
+    Message* messages;
+    size_t mqSize;
+    size_t in;       
+    size_t out; 
+    size_t capacity;
+    size_t totalMessages;
     int qid;
 } MessageQueue;
 

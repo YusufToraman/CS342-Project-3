@@ -6,8 +6,8 @@
 #include "mf.h"
 
 typedef struct {
-    size_t len;                     // Mesajın boyutu.
-    char data[MAX_DATALEN];    // Mesajın içeriği.
+    size_t messageSize;                    
+    char data[];
 } Message;
 
 #endif

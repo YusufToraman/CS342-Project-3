@@ -6,7 +6,7 @@ MessageQueue* create_message_queue(size_t capacity) {
     queue->qid = qid++;
     queue->messages = (Message*)malloc(sizeof(Message) * capacity);
     queue->head = 0;
-    queue->tail = 0;
+    queue->tail = 0; //BU KULLANILMAMIŞ
     queue->capacity = capacity;
     queue->count = 0;
     return queue;
@@ -25,7 +25,7 @@ int enqueue_message(MessageQueue *queue, Message message) {
     // Kuyruk bilgilerini güncelle.
     queue->count++;
 
-    return 0; // Mesaj başarıyla eklendi.
+    return 0;
 }
 
 // Kuyruktan bir mesaj alır.

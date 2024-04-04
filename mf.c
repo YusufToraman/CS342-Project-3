@@ -27,7 +27,6 @@ typedef struct {
     int max_queues_in_shmem;
 } ConfigParams;
 
-//Global de yapabiliriz bence sorun yok ikisi de okey
 void *shmem = NULL;
 ConfigParams config;
 
@@ -65,18 +64,65 @@ int mf_destroy() {
     return MF_SUCCESS;
 }
 
-int mf_connect()
-{
-    return (0);
+int mf_connect() {
+    int shm_fd;
+    shm_fd = shm_open(config.shmem_name, O_RDWR, 0666);
+    if (shm_fd == -1) {
+        perror("Error accessing shared memory");
+        return MF_ERROR;
+    }
+
+    // mmap ile paylaşılan belleği süreç adres alanına eşle
+    shmem = mmap(NULL, config.shmem_size, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
+    if (shmem == MAP_FAILED) {
+        perror("Error mapping shared memory");
+        close(shm_fd);
+        return MF_ERROR;
+    }
+
+    close(shm_fd);
+    // Burada süreç-specific yapılandırma yapılabilir, örneğin:
+    // Paylaşılan bellekte sürecin kullanacağı mesaj kuyruklarına erişim için işaretçiler ayarla
+    // BUNU DA BİRLİKTE KONUŞALIM 
+    
+    return MF_SUCCESS;
 }
    
-int mf_disconnect()
-{
-    return (0);
+int mf_disconnect() {
+    // mmap ile yapılan eşlemeyi geri al
+    if (shmem != NULL) {
+        if (munmap(shmem, config.shmem_size) == -1) {
+            perror("Error unmapping shared memory");
+            return MF_ERROR; // Eşleme geri alınamadı
+        }
+        shmem = NULL;
+    }
+
+    // Burada süreç-specifik senkronizasyon objelerini kapat
+    // Örneğin, semaforların kapatılması:
+    // sem_close(sem1);
+    // sem_close(sem2);
+
+    // Diğer süreç-specifik kaynakların temizlenmesi
+    // ... (varsa)
+
+    return MF_SUCCESS; // Bağlantı başarıyla sonlandırıldı
 }
 
 int mf_create(char *mqname, int mqsize)
 {
+    if (mqname == NULL || mqsize < MIN_MQSIZE || mqsize > MAX_MQSIZE) {
+        return -1;
+    }
+    //KB to Byte
+    size_t mqsize_bytes = mqsize * 1024;
+
+    //Available capacity for message queue ?
+    FixedPortion* fp = (FixedPortion*) shmem;
+    if (fp->mq_count >= config.max_queues_in_shmem) {
+        return -1;
+    }
+
     return (0);
 }
 
@@ -148,7 +194,6 @@ static ConfigParams read_config(const char* filename) {
 }
 
 static void* create_shared_memory(const char* name, size_t size) {
-    printf("name: %s", name);
     int shm_fd = shm_open(name, O_CREAT | O_RDWR, 0666);
     if (shm_fd == -1) {
         perror("shm_open");
