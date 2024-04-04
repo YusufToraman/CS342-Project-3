@@ -5,6 +5,7 @@
 #include <assert.h>
 #include <string.h>
 #include "mf.h"
+#include "mq.h"
 #include <string.h>
 #include <fcntl.h>
 #include <sys/mman.h>
@@ -15,65 +16,71 @@
 #define MF_ERROR -1
 
 typedef struct {
-    int mq_count;
-    //mq_array
-    //config params
-} FixedPortion;
-
-typedef struct {
     char shmem_name[MAXFILENAME];
     size_t shmem_size;
     int max_msgs_in_queue;
     int max_queues_in_shmem;
 } ConfigParams;
 
+typedef struct {
+    int mq_count;
+    ConfigParams config;
+    //hole_manager
+} FixedPortion;
+
 void *shmem = NULL;
-ConfigParams config;
 
 static ConfigParams read_config(const char* filename);
 static void* create_shared_memory(const char* name, size_t size);
 
 int mf_init() {
-    config = read_config(CONFIG_FILENAME);
+    ConfigParams config = read_config(CONFIG_FILENAME);
+    
     shmem = create_shared_memory(config.shmem_name, config.shmem_size);
     if (!shmem) {
         return MF_ERROR;
     }
-
+    
+    FixedPortion* fixedPortion = (FixedPortion*)shmem;
+    fixedPortion->config = config; 
+    fixedPortion->mq_count = 0;   
+    
+    // If using a hole manager or similar, initialize it here
+    // initialize_hole_manager(&fixedPortion->hole_manager); // Adjust based on your implementation
+    
     return MF_SUCCESS;
 }
+
 
 int mf_destroy() {
     if (shmem != NULL) {
-        munmap(shmem, config.shmem_size);
+        FixedPortion* fixedPortion = (FixedPortion*)shmem;
+        
+        char shmemName[MAXFILENAME];
+        strncpy(shmemName, fixedPortion->config.shmem_name, MAXFILENAME);
+        
+        munmap(shmem, fixedPortion->config.shmem_size);
         shmem = NULL;
+        
+        if (shmemName[0] != '\0') {
+            shm_unlink(shmemName);
+        }
     }
-    
-    if (config.shmem_name[0] != '\0') {
-        shm_unlink(config.shmem_name);
-        config.shmem_name[0] = '\0';  // İsmi temizle
-    }
-
-    // Semaforları kapat ve sil
-    for (int i = 0; i < config.max_queues_in_shmem; i++) {
-        char sem_name[256];
-        sprintf(sem_name, "/sem_queue_%d", i);
-        sem_unlink(sem_name);
-    }
-    
     return MF_SUCCESS;
 }
 
+
 int mf_connect() {
+    FixedPortion* fixedPortion = (FixedPortion*)shmem;
     int shm_fd;
-    shm_fd = shm_open(config.shmem_name, O_RDWR, 0666);
+    shm_fd = shm_open(fixedPortion->config.shmem_name, O_RDWR, 0666);
     if (shm_fd == -1) {
         perror("Error accessing shared memory");
         return MF_ERROR;
     }
 
     // mmap ile paylaşılan belleği süreç adres alanına eşle
-    shmem = mmap(NULL, config.shmem_size, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
+    shmem = mmap(NULL, fixedPortion->config.shmem_size, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
     if (shmem == MAP_FAILED) {
         perror("Error mapping shared memory");
         close(shm_fd);
@@ -81,48 +88,25 @@ int mf_connect() {
     }
 
     close(shm_fd);
-    // Burada süreç-specific yapılandırma yapılabilir, örneğin:
-    // Paylaşılan bellekte sürecin kullanacağı mesaj kuyruklarına erişim için işaretçiler ayarla
-    // BUNU DA BİRLİKTE KONUŞALIM 
-    
     return MF_SUCCESS;
 }
    
 int mf_disconnect() {
-    // mmap ile yapılan eşlemeyi geri al
+    FixedPortion* fixedPortion = (FixedPortion*)shmem;
+
     if (shmem != NULL) {
-        if (munmap(shmem, config.shmem_size) == -1) {
+        if (munmap(shmem, fixedPortion->config.shmem_size) == -1) {
             perror("Error unmapping shared memory");
-            return MF_ERROR; // Eşleme geri alınamadı
+            return MF_ERROR;
         }
         shmem = NULL;
     }
 
-    // Burada süreç-specifik senkronizasyon objelerini kapat
-    // Örneğin, semaforların kapatılması:
-    // sem_close(sem1);
-    // sem_close(sem2);
-
-    // Diğer süreç-specifik kaynakların temizlenmesi
-    // ... (varsa)
-
-    return MF_SUCCESS; // Bağlantı başarıyla sonlandırıldı
+    return MF_SUCCESS;
 }
 
 int mf_create(char *mqname, int mqsize)
 {
-    if (mqname == NULL || mqsize < MIN_MQSIZE || mqsize > MAX_MQSIZE) {
-        return -1;
-    }
-    //KB to Byte
-    size_t mqsize_bytes = mqsize * 1024;
-
-    //Available capacity for message queue ?
-    FixedPortion* fp = (FixedPortion*) shmem;
-    if (fp->mq_count >= config.max_queues_in_shmem) {
-        return -1;
-    }
-
     return (0);
 }
 
@@ -160,14 +144,10 @@ int mf_print()
     return (0);
 }
 
-//PRINT İLE DOĞRU OKUYOR MU DİYE TEST ET !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-static ConfigParams read_config(const char* filename) {
-    FILE* file = fopen(filename, "r");
 
-    strcpy(config.shmem_name, "/default_shmem");
-    config.shmem_size = MIN_SHMEMSIZE;
-    config.max_msgs_in_queue = 10;
-    config.max_queues_in_shmem = 5;
+static ConfigParams read_config(const char* filename) {
+    ConfigParams config;
+    FILE* file = fopen(filename, "r");
     
     if (!file) {
         perror("Unable to open the config file");
