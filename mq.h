@@ -10,8 +10,6 @@
 #include <semaphore.h>
 #include "mf.h"
 
-int qid = 0;
-
 typedef struct {
     size_t messageSize;                    
     char data[]; //the size of the data section will be stored in messageSize

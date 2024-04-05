@@ -49,10 +49,11 @@ size_t find_free_space_for_queue(FixedPortion* fixedPortion, size_t requestedSiz
     size_t currentOffset = fixedPortion->holeManager.firstHoleOffset;
     
     while (currentOffset != 0) {
-        Hole* hole = (Hole*)((char*)shmem + currentOffset);
+        Hole* hole = (Hole*)((void*)shmem + currentOffset);
         
         if (hole->size >= requestedSize) {
             // Check if the hole is large enough to be split
+            // hole = 102 queue 100 size of hole 5
             if (hole->size > requestedSize + sizeof(Hole)) {
                 size_t newHoleOffset = currentOffset + sizeof(Hole) + requestedSize;
                 Hole* newHole = (Hole*)((char*)shmem + newHoleOffset);
@@ -195,8 +196,8 @@ int mf_create(char *mqname, int mqsize) {
     mqHeader->start_pos_of_queue = offset + sizeof(MessageQueueHeader); // Headerin arkasında queue olarak kullanacağımız yer
     mqHeader->end_pos_of_queue = mqHeader->start_pos_of_queue + mqsize; // bu da başlangıç + data size yani mqsize
     mqHeader->mq_data_size = mqsize; 
-    mqHeader->in = 0;
-    mqHeader->out = 0; 
+    mqHeader->in = mqHeader->start_pos_of_queue;
+    mqHeader->out = mqHeader->start_pos_of_queue; 
     mqHeader->max_messages_allowed = fixedPortion->config.max_msgs_in_queue; 
     mqHeader->total_message_no = 0;
     mqHeader->qid = fixedPortion->unique_id++;
@@ -300,6 +301,3 @@ static void* create_shared_memory(const char* name, size_t size) {
     }
     return addr;
 }
-
-
-
