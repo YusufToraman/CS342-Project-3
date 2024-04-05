@@ -381,3 +381,15 @@ static void* create_shared_memory(const char* name, size_t size) {
     }
     return addr;
 }
+
+size_t calculate_available_space(MessageQueueHeader* mqHeader) {
+    //END YANLIŞ SANIRIM 
+    size_t lastPos = mqHeader->end_pos_of_queue;
+
+    if (mqHeader->in >= mqHeader->out) {
+        return lastPos - mqHeader->in;
+    } else {
+        // in out'un arkasına düştüyse 
+        return mqHeader->out - mqHeader->in;
+    }
+}
