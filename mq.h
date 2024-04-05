@@ -25,7 +25,9 @@ typedef struct {
     size_t max_messages_allowed; //total messages allowed
     int total_message_no; //current messages number
     int qid;
-    sem_t* sem;
+    sem_t QueueSem; //will be initalized to 1
+    sem_t SpaceSem; //will be initalized to 0
+    sem_t ZeroSem; //will be initalized to 0 
 } MessageQueueHeader;
 
 #endif

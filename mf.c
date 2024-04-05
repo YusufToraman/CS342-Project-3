@@ -182,7 +182,7 @@ int mf_create(char *mqname, int mqsize) {
     FixedPortion* fixedPortion = (FixedPortion*)shmem;
     size_t requiredSize = sizeof(MessageQueueHeader) + mqsize;
     
-    size_t offset = find_free_space_for_queue(fixedPortion->config.shmem_size, requiredSize);
+    size_t offset = find_free_space_for_queue(fixedPortion->config.shmem_size, requiredSize); //EKSİK
     if (offset == (size_t)-1) {
         return MF_ERROR;
     }
@@ -202,15 +202,19 @@ int mf_create(char *mqname, int mqsize) {
     mqHeader->total_message_no = 0;
     mqHeader->qid = fixedPortion->unique_id++;
 
-    char semName[64]; // Adjust size as necessary
-    sprintf(semName, "/mq_%d_sem", mqHeader->qid); // Unique semaphore name based on the queue ID
+    if (sem_init(&mqHeader->QueueSem, 1, 1) != 0) {
+        perror("Failed to initialize QueueSem semaphore");
+        exit(EXIT_FAILURE);
+    }
+    
+    if (sem_init(&mqHeader->SpaceSem, 1, 0) != 0) {
+        perror("Failed to initialize SpaceSem semaphore");
+        exit(EXIT_FAILURE);
+    }
 
-    // Create and initialize the named semaphore
-    mqHeader->sem = sem_open(semName, O_CREAT | O_EXCL, 0644, 1); // Initial value of 1
-    if (mqHeader->sem == SEM_FAILED) {
-        perror("Failed to open semaphore");
-        // Handle semaphore creation failure, possibly by cleaning up already allocated resources
-        return MF_ERROR;
+    if (sem_init(&mqHeader->ZeroSem, 1, 0) != 0) {
+        perror("Failed to initialize SpaceSem semaphore");
+        exit(EXIT_FAILURE);
     }
 
     fixedPortion->mq_count++;
@@ -236,16 +240,92 @@ int mf_close(int qid)
 }
 
 
-int mf_send (int qid, void *bufptr, int datalen)
-{
-    printf ("mf_send called\n");
-    return (0);
+int mf_send(int qid, void *bufptr, int datalen) {
+    MessageQueueHeader* mqHeader = find_mq_header_by_qid(qid); //EKSİK
+    if (!mqHeader) return MF_ERROR;
+
+    if (datalen > MAX_DATALEN) {
+        perror("Message is too big.");
+        return -1;
+    }
+
+    // Wait for exclusive access
+    if (sem_wait(&mqHeader->QueueSem) == -1) {
+        perror("Error waiting for QueueSem");
+        return MF_ERROR;
+    }
+
+    // Check if there's enough space for the new message
+    size_t requiredSpace = sizeof(size_t) + datalen;
+    size_t availableSpace = calculate_available_space(mqHeader); //EKSİK
+
+    // If not enough space, wait on SpaceSem and check again
+    while (requiredSpace > availableSpace) {
+        sem_post(&mqHeader->QueueSem); // Release exclusive access
+        sem_wait(&mqHeader->SpaceSem); // Wait for space to be available
+
+        // Re-acquire exclusive access to check space again
+        if (sem_wait(&mqHeader->QueueSem) == -1) {
+            perror("Error re-waiting for QueueSem");
+            return MF_ERROR;
+        }
+        availableSpace = calculate_available_space(mqHeader);
+    }
+
+    // At this point, there's guaranteed enough space. Enqueue the message.
+    enqueue_message(mqHeader, bufptr, datalen); //EKSİK
+
+    sem_post(&mqHeader->ZeroSem);
+    sem_post(&mqHeader->QueueSem);
+
+    return MF_SUCCESS;
 }
 
-int mf_recv (int qid, void *bufptr, int bufsize)
-{
-    printf ("mf_recv called\n");
-    return (0);
+
+int mf_recv(int qid, void *bufptr, int bufsize) {
+    MessageQueueHeader* mqHeader = find_mq_header_by_qid(qid); 
+    if (!mqHeader) {
+        perror("Queue not found");
+        return -1;
+    }
+
+    if (bufsize < MAX_DATALEN) {
+        perror("Buffer size too small");
+        return -1;
+    }
+
+    // Wait for exclusive access to the queue
+    if (sem_wait(&mqHeader->QueueSem) == -1) {
+        perror("Error waiting for QueueSem");
+        return -1;
+    }
+
+    // Check if the queue has messages
+    while (mqHeader->total_message_no <= 0) {
+        // The queue is empty, release the QueueSem and wait for messages to become available
+        sem_post(&mqHeader->QueueSem);
+        sem_wait(&mqHeader->ZeroSem); 
+        
+        if (sem_wait(&mqHeader->QueueSem) == -1) {
+            perror("Error re-waiting for QueueSem");
+            return -1;
+        }
+    }
+
+    // At this point, there are messages in the queue.
+    // Assuming dequeue_message properly handles the FIFO retrieval and updates mqHeader
+    int msgSize = dequeue_message(mqHeader, bufptr, bufsize); //EKSİK
+    if (msgSize == -1) {
+        sem_post(&mqHeader->QueueSem);
+        return -1;
+    }
+
+    mqHeader->total_message_no--;
+
+    sem_post(&mqHeader->SpaceSem);
+    sem_post(&mqHeader->QueueSem);
+
+    return msgSize;
 }
 
 int mf_print()
