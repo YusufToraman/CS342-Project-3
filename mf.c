@@ -49,47 +49,45 @@ size_t find_free_space_for_queue(FixedPortion* fixedPortion, size_t requestedSiz
     size_t currentOffset = fixedPortion->holeManager.firstHoleOffset;
     
     while (currentOffset != 0) {
-        Hole* hole = (Hole*)((void*)shmem + currentOffset);
+        Hole* hole = (Hole*)((char*)shmem + currentOffset);
         
-        if (hole->size >= requestedSize) {
-            // Check if the hole is large enough to be split
-            // hole = 102 queue 100 size of hole 5
-            if (hole->size > requestedSize + sizeof(Hole)) {
-                size_t newHoleOffset = currentOffset + sizeof(Hole) + requestedSize;
+        if (hole->size >= requestedSize) { 
+            size_t allocatedSpaceStart = currentOffset; 
+          
+            if (hole->size > requestedSize) {
+                size_t newHoleOffset = currentOffset + requestedSize;
                 Hole* newHole = (Hole*)((char*)shmem + newHoleOffset);
-                newHole->start = hole->start + requestedSize;
-                newHole->size = hole->size - requestedSize - sizeof(Hole);
+                
+                newHole->start = newHoleOffset;
+                newHole->size = hole->size - requestedSize;
                 newHole->next = hole->next;
                 
-                hole->size = requestedSize; // Adjust the current hole size
-                
                 if (prevOffset == 0) {
-                    // This was the first hole, update the manager
                     fixedPortion->holeManager.firstHoleOffset = newHoleOffset;
                 } else {
-                    // Link the previous hole to the new hole
                     Hole* prevHole = (Hole*)((char*)shmem + prevOffset);
                     prevHole->next = newHoleOffset;
                 }
-                return hole->start; // Return the start of the allocated space
+                
             } else {
-                // Use the hole as-is, remove it from the list
+                // Eğer tam uyuyorsa, hole'u listeden çıkar
                 if (prevOffset == 0) {
                     fixedPortion->holeManager.firstHoleOffset = hole->next;
                 } else {
                     Hole* prevHole = (Hole*)((char*)shmem + prevOffset);
                     prevHole->next = hole->next;
                 }
-                return hole->start;
             }
+            return allocatedSpaceStart; // Yeni MQ için yerin başlangıcı
         }
         
         prevOffset = currentOffset;
         currentOffset = hole->next;
     }
     
-    return (size_t)-1; // Failed to find a suitable space
+    return (size_t)-1; // Uygun bir yer bulunamadı
 }
+
 
 
 void initialize_hole_manager(FixedPortion* fixedPortion, size_t totalShmemSize) {
