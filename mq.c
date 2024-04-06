@@ -1,7 +1,6 @@
 #include "mq.h"
 
 size_t calculate_remaining_space(MessageQueueHeader* mqHeader) {
-    //END YANLIŞ SANIRIM 
     size_t lastPos = mqHeader->end_pos_of_queue;
 
     if (mqHeader->in >= mqHeader->out) {
