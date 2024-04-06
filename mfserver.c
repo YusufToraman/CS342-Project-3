@@ -24,7 +24,6 @@ int main(int argc, char *argv[])
     signal(SIGTERM, signal_handler);
     
     mf_init();
-    
     while (1) {
         sleep(1000);
     }

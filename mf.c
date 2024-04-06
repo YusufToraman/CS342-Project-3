@@ -91,8 +91,6 @@ size_t find_free_space_for_queue(FixedPortion* fixedPortion, size_t requestedSiz
     return (size_t)-1; // Uygun bir yer bulunamadı
 }
 
-
-
 void initialize_hole_manager(FixedPortion* fixedPortion, size_t totalShmemSize) {
     size_t startOfFreeSpace = sizeof(FixedPortion);
     size_t firstHoleOffset = startOfFreeSpace;
@@ -109,18 +107,18 @@ void initialize_hole_manager(FixedPortion* fixedPortion, size_t totalShmemSize) 
 
 int mf_init() {
     ConfigParams config = read_config(CONFIG_FILENAME);
-    
     shmem = create_shared_memory(config.shmem_name, config.shmem_size);
+    printf("LOG2: %p", (void*)shmem);
+    fflush(stdout);
     if (!shmem) {
         return MF_ERROR;
     }
     
     FixedPortion* fixedPortion = (FixedPortion*)shmem;
-    fixedPortion->config = config; 
+    fixedPortion->config = config;
     fixedPortion->mq_count = 0; 
     fixedPortion->unique_id = 1;  
     initialize_hole_manager(fixedPortion, config.shmem_size);
-    
     return MF_SUCCESS;
 }
 
@@ -144,22 +142,25 @@ int mf_destroy() {
 
 
 int mf_connect() {
-    FixedPortion* fixedPortion = (FixedPortion*)shmem;
+    ConfigParams config = read_config(CONFIG_FILENAME);
     int shm_fd;
-    shm_fd = shm_open(fixedPortion->config.shmem_name, O_RDWR, 0666);
+    shm_fd = shm_open(config.shmem_name, O_RDWR, 0666);
     if (shm_fd == -1) {
         perror("Error accessing shared memory");
         return MF_ERROR;
     }
 
     // mmap ile paylaşılan belleği süreç adres alanına eşle
-    shmem = mmap(NULL, fixedPortion->config.shmem_size, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
+    shmem = mmap(NULL, config.shmem_size, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
+    printf("LOG2: %p", (void*)shmem);
+    fflush(stdout);
+    printf("LOG3: %s", config.shmem_name);
+    fflush(stdout);
     if (shmem == MAP_FAILED) {
         perror("Error mapping shared memory");
         close(shm_fd);
         return MF_ERROR;
     }
-
     close(shm_fd);
     return MF_SUCCESS;
 }
@@ -278,13 +279,9 @@ int mf_open(char* mqname) {
             return mqHeader->qid;
         }
     }
-
-
     fprintf(stderr, "Cannot connect process to message queue : %s, It already have sender and receiver.\n", mqname);
     return -1;
-
 }
-
 
 int mf_close(int qid) {
     MessageQueueHeader* mqHeader = find_mq_header_by_qid(qid, shmem);

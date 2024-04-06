@@ -18,10 +18,8 @@ int
 main(int argc, char **argv)
 {
     int ret,  i, qid;
-
     sem1 = sem_open(semname1, O_CREAT, 0666, 0); // init sem
     sem2 = sem_open(semname2, O_CREAT, 0666, 0); // init sem
-
     ret = fork();
     if (ret > 0) {
         // parent process - P1
