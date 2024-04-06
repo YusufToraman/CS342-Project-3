@@ -256,8 +256,8 @@ int mf_send(int qid, void *bufptr, int datalen) {
     }
 
     // Check if there's enough space for the new message
-    size_t requiredSpace = sizeof(size_t) + datalen;
-    size_t availableSpace = calculate_available_space(mqHeader); //EKSİK
+    size_t requiredSpace = sizeof(Message) + datalen;
+    size_t availableSpace = calculate_available_space(mqHeader, requiredSpace);
 
     // If not enough space, wait on SpaceSem and check again
     while (requiredSpace > availableSpace) {
@@ -269,11 +269,11 @@ int mf_send(int qid, void *bufptr, int datalen) {
             perror("Error re-waiting for QueueSem");
             return MF_ERROR;
         }
-        availableSpace = calculate_available_space(mqHeader);
+        availableSpace = calculate_available_space(mqHeader, requiredSpace);
     }
 
     // At this point, there's guaranteed enough space. Enqueue the message.
-    enqueue_message(mqHeader, bufptr, datalen); //EKSİK
+    enqueue_message(mqHeader, bufptr, datalen, shmem);
 
     sem_post(&mqHeader->ZeroSem);
     sem_post(&mqHeader->QueueSem);
@@ -312,9 +312,7 @@ int mf_recv(int qid, void *bufptr, int bufsize) {
         }
     }
 
-    // At this point, there are messages in the queue.
-    // Assuming dequeue_message properly handles the FIFO retrieval and updates mqHeader
-    int msgSize = dequeue_message(mqHeader, bufptr, bufsize); //EKSİK
+    int msgSize = dequeue_message(mqHeader, bufptr, bufsize, shmem);
     if (msgSize == -1) {
         sem_post(&mqHeader->QueueSem);
         return -1;
@@ -380,16 +378,4 @@ static void* create_shared_memory(const char* name, size_t size) {
         return NULL;
     }
     return addr;
-}
-
-size_t calculate_available_space(MessageQueueHeader* mqHeader) {
-    //END YANLIŞ SANIRIM 
-    size_t lastPos = mqHeader->end_pos_of_queue;
-
-    if (mqHeader->in >= mqHeader->out) {
-        return lastPos - mqHeader->in;
-    } else {
-        // in out'un arkasına düştüyse 
-        return mqHeader->out - mqHeader->in;
-    }
 }
