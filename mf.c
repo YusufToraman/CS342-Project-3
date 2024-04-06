@@ -241,7 +241,7 @@ int mf_close(int qid)
 
 
 int mf_send(int qid, void *bufptr, int datalen) {
-    MessageQueueHeader* mqHeader = find_mq_header_by_qid(qid); //EKSİK
+    MessageQueueHeader* mqHeader = find_mq_header_by_qid(qid, shmem);
     if (!mqHeader) return MF_ERROR;
 
     if (datalen > MAX_DATALEN) {
@@ -283,7 +283,7 @@ int mf_send(int qid, void *bufptr, int datalen) {
 
 
 int mf_recv(int qid, void *bufptr, int bufsize) {
-    MessageQueueHeader* mqHeader = find_mq_header_by_qid(qid); 
+    MessageQueueHeader* mqHeader = find_mq_header_by_qid(qid, shmem); 
     if (!mqHeader) {
         perror("Queue not found");
         return -1;
@@ -378,4 +378,23 @@ static void* create_shared_memory(const char* name, size_t size) {
         return NULL;
     }
     return addr;
+}
+
+//SHMEM ZATEN GLOBAL, PARAMETRE VERMEYEBEİLİRZ. TEST EDERKEN İŞİMİZ KOLAYLAŞIR KAlSIN DEDİM
+MessageQueueHeader* find_mq_header_by_qid(int qid, void* shmem_base) {
+    // Başlangıçta fixed portion'un boyutunu atlıyoruz
+    char* current_position = (char*)shmem_base + sizeof(FixedPortion);
+    char* end_of_shmem = (char*)shmem_base + ((FixedPortion*)shmem_base)->config.shmem_size;
+
+    while (current_position < end_of_shmem) {
+        MessageQueueHeader* mqHeader = (MessageQueueHeader*)current_position;
+
+        if (mqHeader->qid == qid) {
+            return mqHeader;
+        }
+        // Geçerli queue'un bitişinden sonra yeni bir queue başlayabilir
+        // mqHeader->end_pos_of_queue + 1 ile sonraki potansiyel başlangıç noktasına geç
+        current_position = (char*)shmem_base + mqHeader->end_pos_of_queue + 1;
+    }
+    return NULL;
 }
