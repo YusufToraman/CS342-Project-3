@@ -180,21 +180,18 @@ int mf_disconnect() {
 }
 
 int mf_create(char *mqname, int mqsize) {
-
+    mqsize = mqsize * 1024;
     FixedPortion* fixedPortion = (FixedPortion*)shmem;
     size_t requiredSize = sizeof(MessageQueueHeader) + mqsize;
-    
-    size_t offset = find_free_space_for_queue(fixedPortion, requiredSize); //EKSİK
+    size_t offset = find_free_space_for_queue(fixedPortion, requiredSize);
+
     if (offset == (size_t)-1) {
         return MF_ERROR;
     }
     
     MessageQueueHeader* mqHeader = (MessageQueueHeader*)((char*)shmem + offset);
-    
     strncpy(mqHeader->mq_name, mqname, MAX_MQNAMESIZE);
     mqHeader->mq_name[MAX_MQNAMESIZE - 1] = '\0'; 
-    //bu isim kopyalama böyle oluyomus 
-
     mqHeader->start_pos_of_queue = offset + sizeof(MessageQueueHeader); // Headerin arkasında queue olarak kullanacağımız yer
     mqHeader->end_pos_of_queue = mqHeader->start_pos_of_queue + mqsize; // bu da başlangıç + data size yani mqsize
     mqHeader->mq_data_size = mqsize; 
@@ -223,8 +220,7 @@ int mf_create(char *mqname, int mqsize) {
         exit(EXIT_FAILURE);
     }
 
-    fixedPortion->mq_count++;
-    
+    fixedPortion->mq_count++; 
     return mqHeader->qid;
 }
 
