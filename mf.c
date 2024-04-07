@@ -152,10 +152,6 @@ int mf_connect() {
 
     // mmap ile paylaşılan belleği süreç adres alanına eşle
     shmem = mmap(NULL, config.shmem_size, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
-    printf("LOG2: %p", (void*)shmem);
-    fflush(stdout);
-    printf("LOG3: %s", config.shmem_name);
-    fflush(stdout);
     if (shmem == MAP_FAILED) {
         perror("Error mapping shared memory");
         close(shm_fd);
@@ -180,7 +176,8 @@ int mf_disconnect() {
 }
 
 int mf_create(char *mqname, int mqsize) {
-    mqsize = mqsize * 1024;
+    mqsize  = mqsize *1024;
+
     FixedPortion* fixedPortion = (FixedPortion*)shmem;
     size_t requiredSize = sizeof(MessageQueueHeader) + mqsize;
     size_t offset = find_free_space_for_queue(fixedPortion, requiredSize);
@@ -262,6 +259,8 @@ int mf_open(char* mqname) {
     }
     
     pid_t pid = getpid();
+    printf("LOG2: %d", pid);
+    fflush(stdout);
     // Check if this PID is already in the list of active processes
     for (int i = 0; i < 2; i++) {
         if (mqHeader->processes[i] == pid) {
@@ -301,13 +300,19 @@ int mf_close(int qid) {
 
 
 int mf_send(int qid, void *bufptr, int datalen) {
-    MessageQueueHeader* mqHeader = find_mq_header_by_qid(qid, shmem);
-    if (!mqHeader) return MF_ERROR;
-
     if (datalen > MAX_DATALEN) {
         perror("Message is too big.");
         return -1;
     }
+    if (datalen < MIN_DATALEN) {
+        perror("Message is too small.");
+        return -1;
+    }
+
+    MessageQueueHeader* mqHeader = find_mq_header_by_qid(qid, shmem);
+    printf("\nMessage queueyi buldum:\n");
+    printf("Message queue name: %s \n", mqHeader->mq_name);
+    if (!mqHeader) return MF_ERROR;
 
     // Wait for exclusive access
     if (sem_wait(&mqHeader->QueueSem) == -1) {
@@ -316,8 +321,11 @@ int mf_send(int qid, void *bufptr, int datalen) {
     }
 
     // Check if there's enough space for the new message
+    printf("Actual space: %ld \n", mqHeader->end_pos_of_queue - mqHeader->start_pos_of_queue);
     size_t requiredSpace = sizeof(Message) + datalen;
+    printf("Required space: %ld \n", requiredSpace);
     size_t availableSpace = calculate_available_space(mqHeader, requiredSpace);
+    printf("Available space: %ld \n", availableSpace);
 
     // If not enough space, wait on SpaceSem and check again
     while (requiredSpace > availableSpace) {

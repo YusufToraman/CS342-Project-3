@@ -12,23 +12,36 @@ size_t calculate_remaining_space(MessageQueueHeader* mqHeader) {
 }
 
 size_t calculate_available_space(MessageQueueHeader* mqHeader, size_t totalMessageSize) {
+    printf("hello i am here\n");
+    printf("remaining space calculation: %ld\n", calculate_remaining_space(mqHeader));
     // Ensure there's enough space for the message
     if (calculate_remaining_space(mqHeader) < totalMessageSize) {
         if( mqHeader->in > mqHeader->out && mqHeader->out != mqHeader->start_pos_of_queue)
         {
+            printf("hello i am here 1\n");
+            printf("IN: %ld" , mqHeader->in);
+            printf("OUT: %ld" , mqHeader->out);
+            printf("START: %ld" , mqHeader->start_pos_of_queue);
             mqHeader->in = mqHeader->start_pos_of_queue;
             return calculate_remaining_space(mqHeader);
         }
         else if (mqHeader->in = mqHeader->out)
         {
+            printf("hello i am here 2\n");
+            printf("IN: %ld" , mqHeader->in);
+            printf("OUT: %ld" , mqHeader->out);
+            printf("START: %ld" , mqHeader->start_pos_of_queue);
             mqHeader->in = mqHeader->start_pos_of_queue;
             mqHeader->out = mqHeader->start_pos_of_queue;
+            printf("second remaining space calculation: %ld\n", calculate_remaining_space(mqHeader));
             return calculate_remaining_space(mqHeader);
         }
         else{
+            printf("hello i am here 3\n");
             return -1; //no space
         }
     }
+    return calculate_remaining_space(mqHeader);
 }
 
 void enqueue_message(MessageQueueHeader* mqHeader, const void* data, size_t dataSize, void* shmem) {
