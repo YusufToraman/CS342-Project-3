@@ -3,23 +3,23 @@
 size_t calculate_remaining_space(MessageQueueHeader* mqHeader) {
     size_t lastPos = mqHeader->end_pos_of_queue;
 
-    if (mqHeader->in >= mqHeader->out) {
-        return (int)lastPos - mqHeader->in;
+    if ((int)mqHeader->in >= (int)mqHeader->out) {
+        return (int)lastPos - (int)mqHeader->in;
     } else {
         // in out'un arkasına düştüyse 
-        return mqHeader->out - mqHeader->in;
+        return (int)mqHeader->out - (int)mqHeader->in;
     }
 }
 
 size_t calculate_available_space(MessageQueueHeader* mqHeader, size_t totalMessageSize) {
-    // Ensure there's enough space for the message
     if (calculate_remaining_space(mqHeader) < totalMessageSize) {
-        if( mqHeader->in > mqHeader->out && mqHeader->out != mqHeader->start_pos_of_queue)
+        if((int) mqHeader->in > (int) mqHeader->out && mqHeader->out != mqHeader->start_pos_of_queue)
         {
+            mqHeader->circularity = mqHeader->in;
             mqHeader->in = mqHeader->start_pos_of_queue;
             return calculate_remaining_space(mqHeader);
         }
-        else if (mqHeader->in == mqHeader->out)
+        else if ((int)mqHeader->in == (int)mqHeader->out)
         {
             mqHeader->in = mqHeader->start_pos_of_queue;
             mqHeader->out = mqHeader->start_pos_of_queue;
@@ -44,11 +44,11 @@ void enqueue_message(MessageQueueHeader* mqHeader, const void* data, size_t data
 
     Message* newMessage = (Message*)((void*)shmem + mqHeader->in);
     newMessage->messageSize = dataSize;
-    memcpy(newMessage->data, data, dataSize); // Copy the message data
+    memcpy(newMessage->data, data, dataSize);
     
     mqHeader->in = mqHeader->in + totalMessageSize;
 
-    mqHeader->total_message_no++; // Increment the message count
+    mqHeader->total_message_no++;
 }
 
 int dequeue_message(MessageQueueHeader* mqHeader, void* bufptr, size_t bufsize, void* shmem) {
@@ -68,7 +68,14 @@ int dequeue_message(MessageQueueHeader* mqHeader, void* bufptr, size_t bufsize, 
 
     size_t totalMessageSize = sizeof(Message) + message->messageSize;
 
+    //memset(message, 0, sizeof(Message) + message->messageSize);
+
     mqHeader->out = mqHeader->out + totalMessageSize;
+
+    if((int)mqHeader->out == (int)mqHeader->circularity){
+        mqHeader->out = mqHeader->start_pos_of_queue;
+    }
+
     mqHeader->total_message_no--;
 
     return message->messageSize;

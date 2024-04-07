@@ -194,6 +194,7 @@ int mf_create(char *mqname, int mqsize) {
     mqHeader->mq_data_size = mqsize; 
     mqHeader->in = mqHeader->start_pos_of_queue;
     mqHeader->out = mqHeader->start_pos_of_queue; 
+    mqHeader->circularity = mqHeader->end_pos_of_queue;
     mqHeader->max_messages_allowed = fixedPortion->config.max_msgs_in_queue; 
     mqHeader->total_message_no = 0;
     mqHeader->qid = fixedPortion->unique_id++;
@@ -219,7 +220,7 @@ int mf_create(char *mqname, int mqsize) {
 
     fixedPortion->mq_count++; 
     return mqHeader->qid;
-}
+    }
 
 
 int mf_remove(char *mqname) {
@@ -311,8 +312,7 @@ int mf_send(int qid, void *bufptr, int datalen) {
 
     MessageQueueHeader* mqHeader = find_mq_header_by_qid(qid, shmem);
     // MQHeader da yer alan processlerden birisi mi? check
-    printf("\nMessage queueyi buldum:\n");
-    printf("Message queue name: %s \n", mqHeader->mq_name);
+
     if (!mqHeader) return MF_ERROR;
 
     // Wait for exclusive access
@@ -322,11 +322,11 @@ int mf_send(int qid, void *bufptr, int datalen) {
     }
 
     // Check if there's enough space for the new message
-    printf("\nActual space: %ld \n", mqHeader->end_pos_of_queue - mqHeader->start_pos_of_queue);
+    //printf("\nActual space: %ld \n", mqHeader->end_pos_of_queue - mqHeader->start_pos_of_queue);
     size_t requiredSpace = sizeof(Message) + datalen;
-    printf("\nRequired space: %ld \n", requiredSpace);
+    //printf("\nRequired space: %ld \n", requiredSpace);
     size_t availableSpace = calculate_available_space(mqHeader, requiredSpace);
-    printf("\nAvailable space: %ld \n", availableSpace);
+    //printf("\nAvailable space: %ld \n", availableSpace);
 
     // If not enough space, wait on SpaceSem and check again
     while ((int)requiredSpace > (int)availableSpace) {
@@ -346,11 +346,7 @@ int mf_send(int qid, void *bufptr, int datalen) {
     // At this point, there's guaranteed enough space. Enqueue the message.
     enqueue_message(mqHeader, bufptr, datalen, shmem);
 
-    printf("\n enquueuladım \n");
-
-    printf("\nenq IN: %ld\n" , mqHeader->in);
-    printf("\nenq OUT: %ld\n" , mqHeader->out);
-    printf("\nenq START: %ld\n" , mqHeader->start_pos_of_queue);
+    printf("Enqueued: %d \n", datalen);
 
     mqHeader->total_message_no++;
 

@@ -24,6 +24,7 @@ typedef struct {
     size_t mq_data_size; //this is the max bytes that can all messages totally hold
     size_t in;       
     size_t out; 
+    size_t circularity; 
     size_t max_messages_allowed; //total messages allowed
     int total_message_no; //current messages number
     int qid;
@@ -32,8 +33,6 @@ typedef struct {
     sem_t ZeroSem; //will be initalized to 0 
 } MessageQueueHeader;
 
-//MessageQueueHeader* find_mq_header_by_qid(int qid, void* shmem_base);
-//MessageQueueHeader* find_mq_header_by_name(const char* mqname);
 void enqueue_message(MessageQueueHeader* mqHeader, const void* data, size_t dataSize, void* shmem);
 int dequeue_message(MessageQueueHeader* mqHeader, void* bufptr, size_t bufsize, void* shmem);
 size_t calculate_available_space(MessageQueueHeader* mqHeader, size_t totalMessageSize);
