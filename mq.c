@@ -1,82 +1,67 @@
 #include "mq.h"
 
 size_t calculate_remaining_space(MessageQueueHeader* mqHeader) {
-    size_t lastPos = mqHeader->end_pos_of_queue;
-
-    if ((int)mqHeader->in >= (int)mqHeader->out) {
-        return (int)lastPos - (int)mqHeader->in;
-    } else {
-        // in out'un arkasına düştüyse 
-        return (int)mqHeader->out - (int)mqHeader->in;
-    }
+    return mqHeader->end_pos_of_queue - mqHeader->in;
 }
 
 size_t calculate_available_space(MessageQueueHeader* mqHeader, size_t totalMessageSize) {
-    if (calculate_remaining_space(mqHeader) < totalMessageSize) {
-        if((int) mqHeader->in > (int) mqHeader->out && mqHeader->out != mqHeader->start_pos_of_queue)
-        {
-            mqHeader->circularity = mqHeader->in;
-            mqHeader->in = mqHeader->start_pos_of_queue;
-            return calculate_remaining_space(mqHeader);
-        }
-        else if ((int)mqHeader->in == (int)mqHeader->out)
-        {
-            mqHeader->in = mqHeader->start_pos_of_queue;
-            mqHeader->out = mqHeader->start_pos_of_queue;
-            return calculate_remaining_space(mqHeader);
-        }
-        else{
-            printf("\ncalculate available space: no space\n");
-            return -1; //no space
-        }
+    size_t remainingSpace = calculate_remaining_space(mqHeader);
+    if (remainingSpace < totalMessageSize) {
+        printf("\ncalculate available space: no space\n");
+        return 0; // No space available
     }
-    return calculate_remaining_space(mqHeader);
+    return remainingSpace;
 }
 
-void enqueue_message(MessageQueueHeader* mqHeader, const void* data, size_t dataSize, void* shmem) {
-    size_t totalMessageSize = sizeof(Message) + dataSize;
 
-    if (calculate_available_space(mqHeader, totalMessageSize) == -1)
-    {
+void enqueue_message(MessageQueueHeader* mqHeader, const void* data, size_t dataSize, void* shmem) {
+    size_t paddedDataSize = (dataSize + 3) & ~0x03; // Align to 4 bytes
+    size_t totalMessageSize = sizeof(Message) + paddedDataSize;
+    if (calculate_available_space(mqHeader, totalMessageSize) == 0) {
         fprintf(stderr, "Insufficient space for message.\n");
-        return; // Or handle the error as appropriate
+        return;
     }
 
-    Message* newMessage = (Message*)((void*)shmem + mqHeader->in);
+    printf("\nI am enqueueing: %ld\n", dataSize);
+
+    Message* newMessage = (Message*)((char*)shmem + mqHeader->in);
     newMessage->messageSize = dataSize;
     memcpy(newMessage->data, data, dataSize);
-    
-    mqHeader->in = mqHeader->in + totalMessageSize;
-
+    memset(newMessage->data + dataSize, 0, paddedDataSize - dataSize); // Zero out padding
+    //out......................in
+    //in
+    mqHeader->in += totalMessageSize;
+    /*if (mqHeader->in == mqHeader->end_pos_of_queue && mqHeader->in == mqHeader->out) {
+        mqHeader->in = mqHeader->start_pos_of_queue;
+        mqHeader->out = mqHeader->start_pos_of_queue;
+    }*/
     mqHeader->total_message_no++;
 }
 
+
 int dequeue_message(MessageQueueHeader* mqHeader, void* bufptr, size_t bufsize, void* shmem) {
-    if (mqHeader->total_message_no <= 0) {
+    if (mqHeader->total_message_no == 0) {
         fprintf(stderr, "Queue is empty.\n");
-        return -1; // Queue is empty
+        return -1;
     }
 
-    Message* message = (Message*)((void*)shmem + mqHeader->out);
+    Message* message = (Message*)((char*)shmem + mqHeader->out);
 
     if (message->messageSize > bufsize) {
-        fprintf(stderr, "Buffer size too small to hold the message.\n");
-        return -1; // Provided buffer is too small
+        fprintf(stderr, "Buffer size too small to hold the message. Required: %zu, Provided: %zu\n", message->messageSize, bufsize);
+        return -1;
     }
 
     memcpy(bufptr, message->data, message->messageSize);
 
-    size_t totalMessageSize = sizeof(Message) + message->messageSize;
-
-    //memset(message, 0, sizeof(Message) + message->messageSize);
-
-    mqHeader->out = mqHeader->out + totalMessageSize;
-
-    if((int)mqHeader->out == (int)mqHeader->circularity){
+    size_t paddedDataSize = (message->messageSize + 3) & ~0x03; // Align to 4 bytes
+    size_t totalMessageSize = sizeof(Message) + paddedDataSize;
+    //out ..................in
+    mqHeader->out += totalMessageSize;
+    if(mqHeader->out == mqHeader->in){
+        mqHeader->in = mqHeader->start_pos_of_queue;
         mqHeader->out = mqHeader->start_pos_of_queue;
     }
-
-    mqHeader->total_message_no--;
 
     return message->messageSize;
 }

@@ -196,6 +196,8 @@ int mf_create(char *mqname, int mqsize) {
     mqHeader->out = mqHeader->start_pos_of_queue; 
     mqHeader->circularity = mqHeader->end_pos_of_queue;
     mqHeader->max_messages_allowed = fixedPortion->config.max_msgs_in_queue; 
+    mqHeader->spaceSemIndicator = 0;
+    mqHeader->requiredSpace = 0;
     mqHeader->total_message_no = 0;
     mqHeader->qid = fixedPortion->unique_id++;
 
@@ -301,106 +303,62 @@ int mf_close(int qid) {
 
 
 int mf_send(int qid, void *bufptr, int datalen) {
-    if (datalen > MAX_DATALEN) {
-        perror("Message is too big.");
-        return -1;
-    }
-    if (datalen < MIN_DATALEN) {
-        perror("Message is too small.");
+    if (datalen > MAX_DATALEN || datalen < MIN_DATALEN) {
+        perror("Message size out of bounds.");
         return -1;
     }
 
     MessageQueueHeader* mqHeader = find_mq_header_by_qid(qid, shmem);
-    // MQHeader da yer alan processlerden birisi mi? check
-
     if (!mqHeader) return MF_ERROR;
 
-    // Wait for exclusive access
-    if (sem_wait(&mqHeader->QueueSem) == -1) {
-        perror("Error waiting for QueueSem");
-        return MF_ERROR;
-    }
+    sem_wait(&mqHeader->QueueSem); // Ensure exclusive access to the queue.
 
-    // Check if there's enough space for the new message
-    //printf("\nActual space: %ld \n", mqHeader->end_pos_of_queue - mqHeader->start_pos_of_queue);
+    mqHeader->spaceSemIndicator = 0;
+    
     size_t requiredSpace = sizeof(Message) + datalen;
-    //printf("\nRequired space: %ld \n", requiredSpace);
     size_t availableSpace = calculate_available_space(mqHeader, requiredSpace);
-    //printf("\nAvailable space: %ld \n", availableSpace);
-
-    // If not enough space, wait on SpaceSem and check again
+    // Ideally, check for space here again as conditions might have changed.
     while ((int)requiredSpace > (int)availableSpace) {
         printf("\033[43mBEKLIYOR MUUYUMMM\033[0m \n");
-        fflush(stdout);
-        sem_post(&mqHeader->QueueSem); // Release exclusive access
-        sem_wait(&mqHeader->SpaceSem); // Wait for space to be available should wait first all the time
-
-        // Re-acquire exclusive access to check space again
-        if (sem_wait(&mqHeader->QueueSem) == -1) {
-            perror("Error re-waiting for QueueSem");
-            return MF_ERROR;
-        }
+        mqHeader->requiredSpace = requiredSpace;
+        mqHeader->spaceSemIndicator = 1;
+        sem_post(&mqHeader->QueueSem); // Release exclusive access // Wait for space to be available should wait first all the time
+        sem_wait(&mqHeader->SpaceSem);
+        sem_wait(&mqHeader->QueueSem);
+        
         availableSpace = calculate_available_space(mqHeader, requiredSpace);
     }
-
-    // At this point, there's guaranteed enough space. Enqueue the message.
     enqueue_message(mqHeader, bufptr, datalen, shmem);
-
     printf("Enqueued: %d \n", datalen);
 
-    mqHeader->total_message_no++;
-
-    sem_post(&mqHeader->ZeroSem);
+    if (mqHeader->total_message_no > 0) {
+        sem_post(&mqHeader->ZeroSem); // Signal that the queue is not empty.
+    }
     sem_post(&mqHeader->QueueSem);
-
     return MF_SUCCESS;
 }
 
-
 int mf_recv(int qid, void *bufptr, int bufsize) {
-    if (bufsize < MIN_DATALEN) {
-        perror("Buffer size too small");
-        return -1;
-    }
-    if (bufsize > MAX_DATALEN) {
-        perror("Message is too big.");
+    if (bufsize > MAX_DATALEN || bufsize < MIN_DATALEN) {
+        perror("Message size out of bounds.");
         return -1;
     }
 
-    MessageQueueHeader* mqHeader = find_mq_header_by_qid(qid, shmem); 
-        if (!mqHeader) {
-        perror("Queue not found");
-        return -1;
-    }
+    MessageQueueHeader* mqHeader = find_mq_header_by_qid(qid, shmem);
+    if (!mqHeader) return MF_ERROR;
 
-    // Wait for exclusive access to the queue
-    if (sem_wait(&mqHeader->QueueSem) == -1) {
-        perror("Error waiting for QueueSem");
-        return -1;
-    }
-
-    // Check if the queue has messages
-    while (mqHeader->total_message_no <= 0) {
-        // The queue is empty, release the QueueSem and wait for messages to become available
-        sem_post(&mqHeader->QueueSem);
-        sem_wait(&mqHeader->ZeroSem); 
-        
-        if (sem_wait(&mqHeader->QueueSem) == -1) {
-            perror("Error re-waiting for QueueSem");
-            return -1;
-        }
-    }
-
+    sem_wait(&mqHeader->ZeroSem);
+    sem_wait(&mqHeader->QueueSem); // Ensure exclusive access to the queue.
+    
     int msgSize = dequeue_message(mqHeader, bufptr, bufsize, shmem);
-        if (msgSize == -1) {
-        sem_post(&mqHeader->QueueSem);
-        return -1;
-    }
+    
+    printf("Dequeued: %d \n", msgSize);
 
-    mqHeader->total_message_no--;
-
+    if (mqHeader->spaceSemIndicator == 1 && (int)calculate_available_space(mqHeader,mqHeader->requiredSpace) >= (int)mqHeader->requiredSpace) {
+        mqHeader->spaceSemIndicator =  -1;
+        sem_post(&mqHeader->SpaceSem); // indicating that enough space is created
+    } 
     sem_post(&mqHeader->QueueSem);
-    sem_post(&mqHeader->SpaceSem);
 
     return msgSize;
 }

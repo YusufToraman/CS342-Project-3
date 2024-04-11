@@ -51,10 +51,13 @@ main(int argc, char **argv)
         sem_post (sem1);
         
         while (1) {
-            n_sent = rand() % MAX_DATALEN;
+            while(1){
+                n_sent = rand() % MAX_DATALEN;
+                if(n_sent >= MIN_DATALEN && n_sent <= MAX_DATALEN) break;
+            }
             ret = mf_send (qid, (void *) sendbuffer, n_sent);
-            printf ("app sent message, datalen=%d\n", n_sent);
             sentcount++;
+            printf ("\napp sent message, datalen=%d sentcount=%d\n", n_sent, sentcount);
             if (sentcount == totalcount)
                 break;
         }
@@ -74,11 +77,10 @@ main(int argc, char **argv)
         mf_connect();
         
         qid = mf_open(mqname1);
-        
         while (1) {
             n_received =  mf_recv (qid, (void *) recvbuffer, MAX_DATALEN);
-            printf ("app received message, datalen=%d\n", n_received);
             receivedcount++;
+            printf ("\napp received message, datalen=%d, receivedcount=%d\n", n_received, receivedcount);
             if (receivedcount == totalcount)
                 break;
         }

@@ -1,5 +1,5 @@
-#ifndef _MQ_H_
-#define _MQ_H_
+#ifndef MQ_H
+#define MQ_H
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -26,6 +26,8 @@ typedef struct {
     size_t out; 
     size_t circularity; 
     size_t max_messages_allowed; //total messages allowed
+    int spaceSemIndicator;
+    size_t requiredSpace;
     int total_message_no; //current messages number
     int qid;
     sem_t QueueSem; //will be initalized to 1
