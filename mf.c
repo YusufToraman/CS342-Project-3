@@ -176,7 +176,7 @@ int mf_disconnect() {
 }
 
 int mf_create(char *mqname, int mqsize) {
-    mqsize  = mqsize *1024;
+    mqsize  = mqsize * 1024;
 
     FixedPortion* fixedPortion = (FixedPortion*)shmem;
     size_t requiredSize = sizeof(MessageQueueHeader) + mqsize;
@@ -190,8 +190,8 @@ int mf_create(char *mqname, int mqsize) {
     strncpy(mqHeader->mq_name, mqname, MAX_MQNAMESIZE);
     mqHeader->mq_name[MAX_MQNAMESIZE - 1] = '\0'; 
     mqHeader->start_pos_of_queue = offset + sizeof(MessageQueueHeader); // Headerin arkasında queue olarak kullanacağımız yer
-    mqHeader->end_pos_of_queue = mqHeader->start_pos_of_queue + mqsize; // bu da başlangıç + data size yani mqsize
-    mqHeader->mq_data_size = mqsize; 
+    mqHeader->end_pos_of_queue = mqHeader->start_pos_of_queue + mqsize - 1; // bu da başlangıç + data size yani mqsize
+    mqHeader->mq_data_size = mqsize;
     mqHeader->in = mqHeader->start_pos_of_queue;
     mqHeader->out = mqHeader->start_pos_of_queue; 
     mqHeader->circularity = mqHeader->end_pos_of_queue;
@@ -200,7 +200,7 @@ int mf_create(char *mqname, int mqsize) {
     mqHeader->requiredSpace = 0;
     mqHeader->total_message_no = 0;
     mqHeader->qid = fixedPortion->unique_id++;
-
+    printf("\nCREATE INFO: mqname=%s    offset=%ld   start=%ld    end=%ld\n", mqHeader->mq_name, offset, mqHeader->start_pos_of_queue, mqHeader->end_pos_of_queue);
     for (int i = 0; i < 2; i++) {
         mqHeader->processes[i] = -1; //initalize empty processes.
     }
@@ -222,10 +222,10 @@ int mf_create(char *mqname, int mqsize) {
 
     fixedPortion->mq_count++; 
     return mqHeader->qid;
-    }
-
+}
 
 int mf_remove(char *mqname) {
+    printf("\nREMOVE: fixe",)
     FixedPortion* fixedPortion = (FixedPortion*)shmem;
     MessageQueueHeader* mqHeader = find_mq_header_by_name(mqname);
     if (mqHeader == NULL) {
@@ -257,7 +257,7 @@ int mf_remove(char *mqname) {
 int mf_open(char* mqname) {
     MessageQueueHeader* mqHeader = find_mq_header_by_name(mqname);
     if (mqHeader == NULL) {
-        fprintf(stderr, "Message queue not found: %s\n", mqname);
+        fprintf(stderr, "Open Message queue not found: %s\n", mqname);
         return -1;
     }
     
@@ -284,7 +284,7 @@ int mf_open(char* mqname) {
 int mf_close(int qid) {
     MessageQueueHeader* mqHeader = find_mq_header_by_qid(qid, shmem);
     if (!mqHeader) {
-        fprintf(stderr, "Message queue not found for QID: %d\n", qid);
+        fprintf(stderr, "Close Message queue not found for QID: %d\n", qid);
         return -1;
     }
     
@@ -329,7 +329,7 @@ int mf_send(int qid, void *bufptr, int datalen) {
         availableSpace = calculate_available_space(mqHeader, requiredSpace);
     }
     enqueue_message(mqHeader, bufptr, datalen, shmem);
-    printf("Enqueued: %d \n", datalen);
+    printf("mqname %s Enqueued: %d \n", mqHeader->mq_name, datalen);
 
     if (mqHeader->total_message_no > 0) {
         sem_post(&mqHeader->ZeroSem); // Signal that the queue is not empty.
@@ -352,7 +352,7 @@ int mf_recv(int qid, void *bufptr, int bufsize) {
     
     int msgSize = dequeue_message(mqHeader, bufptr, bufsize, shmem);
     
-    printf("Dequeued: %d \n", msgSize);
+    printf("mqname %s Dequeued: %d \n", mqHeader->mq_name, msgSize);
 
     if (mqHeader->spaceSemIndicator == 1 && (int)calculate_available_space(mqHeader,mqHeader->requiredSpace) >= (int)mqHeader->requiredSpace) {
         mqHeader->spaceSemIndicator =  -1;

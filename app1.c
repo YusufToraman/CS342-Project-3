@@ -8,85 +8,193 @@
 #include <semaphore.h>
 #include <sys/mman.h>
 #include <time.h>
+#include <sys/types.h>
+#include <sys/wait.h>
 #include "mf.h"
 
 #define COUNT 10
-char *semname1 = "/semaphore1";
-char *semname2 = "/semaphore2";
-sem_t *sem1, *sem2;
-char *mqname1 = "msgqueue1";
 
-int 
+int totalcount = COUNT;
+
+void test_messageflow_2p1mq();
+void test_messageflow_4p2mq();
+
+
+int
 main(int argc, char **argv)
 {
-    int ret,  i, qid;
-    char sendbuffer[MAX_DATALEN];
-    int n_sent, n_received;
-    char recvbuffer[MAX_DATALEN];
-    int sentcount;
-    int receivedcount;
-    int totalcount;
-    
     totalcount = COUNT;
+    if (argc != 2) {
+        printf ("usage: app2 numberOfMessages\n");
+        exit(1);
+    }
     if (argc == 2)
         totalcount = atoi(argv[1]);
 
-    sem1 = sem_open(semname1, O_CREAT, 0666, 0); // init sem
-    sem2 = sem_open(semname2, O_CREAT, 0666, 0); // init sem
-
     srand(time(0));
-    printf ("RAND_MAX is %d\n", RAND_MAX);
+
+    //test_messageflow_2p1mq();
+    test_messageflow_4p2mq();
+
+	return 0;
+}
+
+
+void test_messageflow_2p1mq()
+{
+    int ret1,   qid;
+    char sendbuffer[MAX_DATALEN];
+    int n_sent;
+    char recvbuffer[MAX_DATALEN];
+    int sentcount = 0; 
+    int receivedcount = 0; 
+    int i;
     
-    ret = fork();
-    if (ret > 0) {
-        // parent process - P1
-        // parent will create a message queue
-        
+    mf_connect();
+    mf_create ("mq1", 16); //  create mq;  size in KB
+
+    ret1 = fork();
+    if (ret1 ==  0) {
+        //  process - P1
+        //  will create a message queue
         mf_connect();
-        
-        mf_create (mqname1, 16); //  create mq;  16 KB
-        
-        qid = mf_open(mqname1);
-        
-        sem_post (sem1);
-        
+        qid = mf_open("mq1");
         while (1) {
-            while(1){
-                n_sent = rand() % MAX_DATALEN;
-                if(n_sent >= MIN_DATALEN && n_sent <= MAX_DATALEN) break;
-            }
-            ret = mf_send (qid, (void *) sendbuffer, n_sent);
+            n_sent = rand() % MAX_DATALEN;
+            mf_send(qid, (void *) sendbuffer, n_sent);
             sentcount++;
-            printf ("\napp sent message, datalen=%d sentcount=%d\n", n_sent, sentcount);
             if (sentcount == totalcount)
                 break;
         }
         mf_close(qid);
-        sem_wait(sem2);
-        // we are sure other process received the messages
-        
-        mf_remove(mqname1);   // remove mq
         mf_disconnect();
+        exit(0);
     }
-    else if (ret == 0) {
-        // child process - P2
-        // child will connect, open mq, use mq
-        sem_wait (sem1);
-        // we are sure mq was created
-        
+    ret1  = fork();
+    if (ret1 == 0) {
+        //  process - P2
         mf_connect();
-        
-        qid = mf_open(mqname1);
+        qid = mf_open("mq1");
         while (1) {
-            n_received =  mf_recv (qid, (void *) recvbuffer, MAX_DATALEN);
+            mf_recv(qid, (void *) recvbuffer, MAX_DATALEN);
             receivedcount++;
-            printf ("\napp received message, datalen=%d, receivedcount=%d\n", n_received, receivedcount);
             if (receivedcount == totalcount)
                 break;
         }
         mf_close(qid);
         mf_disconnect();
-        sem_post(sem2);
+        exit(0);
     }
-	return 0;
+    
+    for (i = 0; i < 2; ++i)
+        wait(NULL);
+    
+    mf_remove("mq1");
+    mf_disconnect(); 
+}
+
+
+
+
+void test_messageflow_4p2mq()
+{
+    int ret1, qid;
+    char sendbuffer[MAX_DATALEN];
+    int n_sent;
+    char recvbuffer[MAX_DATALEN];
+    int sentcount = 0;
+    int receivedcount = 0;
+    int i;
+    
+    mf_connect();
+    mf_create ("mq1", 16); //  create mq;  size in KB
+    mf_create ("mq2", 16); //  create mq;  size in KB
+
+    ret1 = fork();
+    if (ret1 == 0) {
+        printf("\nChild 1\n");
+        // P1
+        // P1 will send
+        srand(time(0));
+        mf_connect();
+        qid = mf_open("mq1");
+        while (1) {
+            n_sent = rand() % MAX_DATALEN;
+            mf_send(qid, (void *) sendbuffer, n_sent);
+            sentcount++;
+            if (sentcount == totalcount)
+                break;
+        }
+        printf("\nNERDESIN PANKO 1\n");
+        mf_close(qid);
+        mf_disconnect();
+        exit(0);
+    }
+    ret1 = fork();
+    if (ret1 == 0) {
+        printf("\nChild 2\n");
+        // P2
+        // P2 will receive
+        srand(time(0));
+        mf_connect();
+        qid = mf_open("mq1");
+        while (1) {
+            mf_recv(qid, (void *) recvbuffer, MAX_DATALEN);
+            receivedcount++;
+            if (receivedcount == totalcount)
+                break;
+        }
+        printf("\nNERDESIN PANKO 2\n");
+        mf_close(qid);
+        mf_disconnect();
+        exit(0);
+    }
+    
+
+    ret1 = fork();
+    if (ret1 == 0) {
+        printf("\nChild 3\n");
+        // P3
+        // P3 will send
+        srand(time(0));
+        mf_connect();
+        qid = mf_open("mq2");
+        while (1) {
+            n_sent = rand() % MAX_DATALEN;
+            mf_send(qid, (void *) sendbuffer, n_sent);
+            sentcount++;
+            if (sentcount == totalcount)
+                break;
+        }
+        printf("\nNERDESIN PANKO 3\n");
+        mf_close(qid);
+        mf_disconnect();
+        exit(0);
+    }
+    ret1 = fork();
+    if (ret1 == 0) {
+        printf("\nChild 4\n");
+        // P4
+        // P4 will receive
+        srand(time(0));
+        mf_connect();
+        qid = mf_open("mq2");
+        while (1) {
+            mf_recv(qid, (void *) recvbuffer, MAX_DATALEN);
+            receivedcount++;
+            if (receivedcount == totalcount)
+                break;
+        }
+        printf("\nNERDESIN PANKO 4\n");
+        mf_close(qid);
+        mf_disconnect();
+        exit(0);
+    }
+    printf("\nHADI BAKIM\n");
+    for (i = 0; i < 4; ++i)
+        wait(NULL);
+    
+    mf_remove("mq1");
+    mf_remove("mq2");
+    mf_disconnect();
 }
