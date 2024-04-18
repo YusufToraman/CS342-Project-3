@@ -47,60 +47,81 @@ MessageQueueHeader* find_mq_header_by_qid(int qid, void* shmem_base);
 MessageQueueHeader* find_mq_header_by_name(const char* mqname);
 size_t find_free_space_for_queue(FixedPortion* fixedPortion, size_t requestedSize);
 
-void mark_space_as_available(MessageQueueHeader* mqHeader, FixedPortion* fixedPortion){
+void mark_space_as_available(MessageQueueHeader* mqHeader, FixedPortion* fixedPortion) {
     size_t total_size = sizeof(MessageQueueHeader) + mqHeader->mq_data_size;
-    Hole* newHole = (Hole*)(mqHeader); 
-    newHole->start = mqHeader->mq_start_offset; //SHMEM AKLINDA OLSUN
+    size_t mqStartOffset = mqHeader->mq_start_offset; // Calculate offset of mqHeader in shared memory
+
+    // Define new hole at the location of the MessageQueueHeader being freed
+    memset(mqHeader, 0, total_size);
+    Hole* newHole = (Hole*)((char*)shmem + mqStartOffset);
+    newHole->start = mqStartOffset;
     newHole->size = total_size;
     newHole->next = 0;
-    
-    
+
+    // First hole insertion check
     if (fixedPortion->holeManager.firstHoleOffset == 0) {
         fixedPortion->holeManager.firstHoleOffset = newHole->start;
-    } 
-    else {
-        // Mevcut delik listesinin sonuna bu yeni deliği ekle
+    } else {
+        // Traverse the hole list to find the correct insertion point and merge holes if necessary
         size_t currentOffset = fixedPortion->holeManager.firstHoleOffset;
         Hole* currentHole = (Hole*)((char*)shmem + currentOffset);
-        while (currentHole->next != 0) {
-            currentOffset = currentHole->next;
-            currentHole = (Hole*)((char*)shmem + currentOffset);
-        }
-        currentHole->next = newHole->start;
-    }
+        Hole* prevHole = NULL;
 
-    // Eski kuyruk verilerini temizle
-    memset(mqHeader, 0, total_size);
+        while (currentHole && currentHole->start < newHole->start) {
+            if (currentHole->start + currentHole->size == newHole->start) {
+                // Merge current hole with new hole if they are adjacent
+                currentHole->size += newHole->size;
+                newHole = currentHole; // Now newHole refers to the merged hole
+            }
+
+            prevHole = currentHole;
+            currentOffset = currentHole->next;
+            currentHole = (currentOffset != 0) ? (Hole*)((char*)shmem + currentOffset) : NULL;
+        }
+
+        if (prevHole) {
+            if (prevHole->start + prevHole->size == newHole->start) {
+                // Merge previous hole with new hole if they are adjacent
+                prevHole->size += newHole->size;
+            } else {
+                // Insert new hole into the list
+                newHole->next = prevHole->next;
+                prevHole->next = newHole->start;
+            }
+        } else {
+            // This happens if the new hole needs to be the first in the list
+            newHole->next = fixedPortion->holeManager.firstHoleOffset;
+            fixedPortion->holeManager.firstHoleOffset = newHole->start;
+        }
+    }
 }
 
 
 size_t find_free_space_for_queue(FixedPortion* fixedPortion, size_t requestedSize) {
     size_t prevOffset = 0;
     size_t currentOffset = fixedPortion->holeManager.firstHoleOffset;
-    
+
     while (currentOffset != 0) {
         Hole* hole = (Hole*)((char*)shmem + currentOffset);
-        
-        if (hole->size >= requestedSize) { 
-            size_t allocatedSpaceStart = currentOffset; 
-          
+
+        if (hole->size >= requestedSize) {
+            size_t allocatedSpaceStart = currentOffset;
+
             if (hole->size > requestedSize) {
                 size_t newHoleOffset = currentOffset + requestedSize;
                 Hole* newHole = (Hole*)((char*)shmem + newHoleOffset);
-                
+
                 newHole->start = newHoleOffset;
                 newHole->size = hole->size - requestedSize;
                 newHole->next = hole->next;
-                
+
                 if (prevOffset == 0) {
                     fixedPortion->holeManager.firstHoleOffset = newHoleOffset;
                 } else {
                     Hole* prevHole = (Hole*)((char*)shmem + prevOffset);
                     prevHole->next = newHoleOffset;
                 }
-                
             } else {
-                // Eğer tam uyuyorsa, hole'u listeden çıkar
                 if (prevOffset == 0) {
                     fixedPortion->holeManager.firstHoleOffset = hole->next;
                 } else {
@@ -108,15 +129,16 @@ size_t find_free_space_for_queue(FixedPortion* fixedPortion, size_t requestedSiz
                     prevHole->next = hole->next;
                 }
             }
-            return allocatedSpaceStart; // Yeni MQ için yerin başlangıcı
+            return allocatedSpaceStart;
         }
-        
+
         prevOffset = currentOffset;
         currentOffset = hole->next;
     }
-    
-    return (size_t)-1; // Uygun bir yer bulunamadı
+
+    return (size_t)-1;  // No suitable space found
 }
+
 
 void initialize_hole_manager(FixedPortion* fixedPortion, size_t totalShmemSize) {
     size_t startOfFreeSpace = sizeof(FixedPortion);
@@ -270,9 +292,6 @@ int mf_remove(char *mqname) {
     
     // BU METHOD YAZILMASI LAZIM YANİ BUNUN YERİNİ HOLE LİST E GERİ KOYCAZ.
     mark_space_as_available(mqHeader, fixedPortion);
-
-    // BURASI memorynin o kısmını 0 lıyor. Mantıklı ama bunu üstteki için yazacağımız fonskiyonun 
-    //içinde de yapabiliriz. Yani hole olarak eklerken sıfırlayıp ekler.
     fixedPortion->mq_count--;
 
     return MF_SUCCESS;
