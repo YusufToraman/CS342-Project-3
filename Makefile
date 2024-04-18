@@ -1,7 +1,7 @@
-CC	:= gcc
+CC := gcc
 CFLAGS := -g -Wall
 
-TARGETS := libmf.a app1 mfserver
+TARGETS := libmf.a app1 mfserver producer consumer
 
 # Make sure that 'all' is the first target
 all: $(TARGETS)
@@ -14,29 +14,23 @@ libmf.a: $(MF_OBJS)
 
 MF_LIB := -L. -lrt -lpthread -lmf
 
-mf.o: mf.c mf.h mq.h
-	gcc -c $(CFLAGS) -o $@ mf.c
-
-mq.o: mq.c mq.h
-	gcc -c $(CFLAGS) -o $@ mq.c
-
-app1.o: app1.c mf.h mq.h
-	gcc -c $(CFLAGS) -o $@ app1.c
+%.o: %.c mf.h mq.h
+	$(CC) -c $(CFLAGS) -o $@ $<
 
 app1: app1.o libmf.a
-	gcc $(CFLAGS) -o $@ app1.o $(MF_LIB)
-
-mfserver.o: mfserver.c mf.h mq.h
-	gcc -c $(CFLAGS) -o $@ mfserver.c
+	$(CC) $(CFLAGS) -o $@ app1.o $(MF_LIB)
 
 mfserver: mfserver.o libmf.a
-	gcc $(CFLAGS) -o $@ mfserver.o $(MF_LIB)
+	$(CC) $(CFLAGS) -o $@ mfserver.o $(MF_LIB)
+
+producer: producer.o libmf.a
+	$(CC) $(CFLAGS) -o $@ producer.o $(MF_LIB)
+
+consumer: consumer.o libmf.a
+	$(CC) $(CFLAGS) -o $@ consumer.o $(MF_LIB)
 
 test: test.c
-	gcc -g -Wall -o test test.c
+	$(CC) $(CFLAGS) -o test test.c
 
 clean:
 	rm -rf core *.o *.out *~ $(TARGETS)
-
-	
-	
