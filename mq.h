@@ -19,6 +19,7 @@ typedef struct {
 typedef struct {
     char mq_name[MAX_MQNAMESIZE];
     pid_t processes[2]; //sender and receiver
+    size_t mq_start_offset;
     size_t start_pos_of_queue;       
     size_t end_pos_of_queue; 
     size_t mq_data_size; //this is the max bytes that can all messages totally hold

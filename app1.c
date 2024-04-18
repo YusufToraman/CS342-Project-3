@@ -196,5 +196,14 @@ void test_messageflow_4p2mq()
     
     mf_remove("mq1");
     mf_remove("mq2");
+
+    mf_create ("mq3", 128); //  create mq;  size in KB
+    mf_create("mq4", 128);
+    mf_remove ("mq3"); //  create mq;  size in KB
+    mf_create("mq5", 128);
+    mf_remove("mq4");
+    mf_remove("mq5");
+    mf_create("mq6", 128);
+    mf_remove("mq6");
     mf_disconnect();
 }

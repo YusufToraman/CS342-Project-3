@@ -47,6 +47,33 @@ MessageQueueHeader* find_mq_header_by_qid(int qid, void* shmem_base);
 MessageQueueHeader* find_mq_header_by_name(const char* mqname);
 size_t find_free_space_for_queue(FixedPortion* fixedPortion, size_t requestedSize);
 
+void mark_space_as_available(MessageQueueHeader* mqHeader, FixedPortion* fixedPortion){
+    size_t total_size = sizeof(MessageQueueHeader) + mqHeader->mq_data_size;
+    Hole* newHole = (Hole*)(mqHeader); 
+    newHole->start = mqHeader->mq_start_offset; //SHMEM AKLINDA OLSUN
+    newHole->size = total_size;
+    newHole->next = 0;
+    
+    
+    if (fixedPortion->holeManager.firstHoleOffset == 0) {
+        fixedPortion->holeManager.firstHoleOffset = newHole->start;
+    } 
+    else {
+        // Mevcut delik listesinin sonuna bu yeni deliği ekle
+        size_t currentOffset = fixedPortion->holeManager.firstHoleOffset;
+        Hole* currentHole = (Hole*)((char*)shmem + currentOffset);
+        while (currentHole->next != 0) {
+            currentOffset = currentHole->next;
+            currentHole = (Hole*)((char*)shmem + currentOffset);
+        }
+        currentHole->next = newHole->start;
+    }
+
+    // Eski kuyruk verilerini temizle
+    memset(mqHeader, 0, total_size);
+}
+
+
 size_t find_free_space_for_queue(FixedPortion* fixedPortion, size_t requestedSize) {
     size_t prevOffset = 0;
     size_t currentOffset = fixedPortion->holeManager.firstHoleOffset;
@@ -108,8 +135,6 @@ void initialize_hole_manager(FixedPortion* fixedPortion, size_t totalShmemSize) 
 int mf_init() {
     ConfigParams config = read_config(CONFIG_FILENAME);
     shmem = create_shared_memory(config.shmem_name, config.shmem_size);
-    printf("LOG2: %p", (void*)shmem);
-    fflush(stdout);
     if (!shmem) {
         return MF_ERROR;
     }
@@ -187,6 +212,7 @@ int mf_create(char *mqname, int mqsize) {
     }
     
     MessageQueueHeader* mqHeader = (MessageQueueHeader*)((char*)shmem + offset);
+    mqHeader->mq_start_offset = offset;
     strncpy(mqHeader->mq_name, mqname, MAX_MQNAMESIZE);
     mqHeader->mq_name[MAX_MQNAMESIZE - 1] = '\0'; 
     mqHeader->start_pos_of_queue = offset + sizeof(MessageQueueHeader); // Headerin arkasında queue olarak kullanacağımız yer
@@ -201,6 +227,7 @@ int mf_create(char *mqname, int mqsize) {
     mqHeader->total_message_no = 0;
     mqHeader->qid = fixedPortion->unique_id++;
     printf("\nCREATE INFO: mqname=%s    offset=%ld   start=%ld    end=%ld\n", mqHeader->mq_name, offset, mqHeader->start_pos_of_queue, mqHeader->end_pos_of_queue);
+    printf("\nshmem_end:%ld\n",fixedPortion->config.shmem_size);
     for (int i = 0; i < 2; i++) {
         mqHeader->processes[i] = -1; //initalize empty processes.
     }
@@ -225,9 +252,10 @@ int mf_create(char *mqname, int mqsize) {
 }
 
 int mf_remove(char *mqname) {
-    printf("\nREMOVE: fixe",)
     FixedPortion* fixedPortion = (FixedPortion*)shmem;
+    printf("\nREMOVE 1: shmemname:%s\n", fixedPortion->config.shmem_name);
     MessageQueueHeader* mqHeader = find_mq_header_by_name(mqname);
+    printf("\nREMOVE 2: mqHeader.name:%s\n", mqHeader->mq_name);
     if (mqHeader == NULL) {
         fprintf(stderr, "Message queue not found: %s\n", mqname);
         return -1; // Queue not found
@@ -241,12 +269,10 @@ int mf_remove(char *mqname) {
     } */
     
     // BU METHOD YAZILMASI LAZIM YANİ BUNUN YERİNİ HOLE LİST E GERİ KOYCAZ.
-    //mark_space_as_available(mqHeader);
+    mark_space_as_available(mqHeader, fixedPortion);
 
     // BURASI memorynin o kısmını 0 lıyor. Mantıklı ama bunu üstteki için yazacağımız fonskiyonun 
     //içinde de yapabiliriz. Yani hole olarak eklerken sıfırlayıp ekler.
-    memset(mqHeader, 0, sizeof(MessageQueueHeader) + mqHeader->mq_data_size);
-
     fixedPortion->mq_count--;
 
     return MF_SUCCESS;
@@ -446,7 +472,7 @@ MessageQueueHeader* find_mq_header_by_name(const char* mqname) {
         if (strncmp(mqHeader->mq_name, mqname, MAX_MQNAMESIZE) == 0) {
             return mqHeader; 
         }
-        current_position += sizeof(MessageQueueHeader) + mqHeader->mq_data_size;
+        current_position += 1;
     }
     return NULL;
 }
