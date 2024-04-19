@@ -10,6 +10,9 @@
 #include <semaphore.h>
 #include <unistd.h>
 #include "mf.h"
+#include <pthread.h>
+
+#define MQ_SIGNATURE_SIZE 13
 
 typedef struct {
     size_t messageSize;                    
@@ -18,7 +21,8 @@ typedef struct {
 
 typedef struct {
     char mq_name[MAX_MQNAMESIZE];
-    pid_t processes[2]; //sender and receiver
+    char mq_signature[MQ_SIGNATURE_SIZE];
+    pid_t processes[16]; //sender and receiver
     size_t mq_start_offset;
     size_t start_pos_of_queue;       
     size_t end_pos_of_queue; 
@@ -31,6 +35,7 @@ typedef struct {
     size_t requiredSpace;
     int total_message_no; //current messages number
     int qid;
+    pthread_mutex_t mutex; // Mutex for synchronization
     sem_t QueueSem; //will be initalized to 1
     sem_t SpaceSem; //will be initalized to 0
     sem_t ZeroSem; //will be initalized to 0 

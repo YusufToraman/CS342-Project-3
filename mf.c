@@ -15,6 +15,7 @@
 #define MF_SUCCESS 0 
 #define MF_ERROR -1
 
+
 typedef struct {
     size_t start; // Offset to the start of the hole
     size_t size;  // Size of the hole
@@ -156,6 +157,9 @@ void initialize_hole_manager(FixedPortion* fixedPortion, size_t totalShmemSize) 
 
 int mf_init() {
     ConfigParams config = read_config(CONFIG_FILENAME);
+    if(config.shmem_size < MIN_SHMEMSIZE * 1024 || config.shmem_size > MAX_SHMEMSIZE * 1024){
+        return MF_ERROR;
+    }
     shmem = create_shared_memory(config.shmem_name, config.shmem_size);
     if (!shmem) {
         return MF_ERROR;
@@ -223,6 +227,9 @@ int mf_disconnect() {
 }
 
 int mf_create(char *mqname, int mqsize) {
+    if(mqsize < MIN_MQSIZE || mqsize > MAX_MQSIZE){
+        return MF_ERROR;
+    }
     mqsize  = mqsize * 1024 + 1;
 
     FixedPortion* fixedPortion = (FixedPortion*)shmem;
@@ -232,11 +239,13 @@ int mf_create(char *mqname, int mqsize) {
     if (offset == (size_t)-1) {
         return MF_ERROR;
     }
-    
     MessageQueueHeader* mqHeader = (MessageQueueHeader*)((char*)shmem + offset);
     mqHeader->mq_start_offset = offset;
     strncpy(mqHeader->mq_name, mqname, MAX_MQNAMESIZE);
-    mqHeader->mq_name[MAX_MQNAMESIZE - 1] = '\0'; 
+    mqHeader->mq_name[MAX_MQNAMESIZE - 1] = '\0';
+    const char* signature = "mq_signature";
+    strncpy(mqHeader->mq_signature, signature, MQ_SIGNATURE_SIZE);
+    mqHeader->mq_signature[MQ_SIGNATURE_SIZE - 1] = '\0';
     mqHeader->start_pos_of_queue = offset + sizeof(MessageQueueHeader); // Headerin arkasında queue olarak kullanacağımız yer
     mqHeader->end_pos_of_queue = mqHeader->start_pos_of_queue + mqsize - 1; // bu da başlangıç + data size yani mqsize
     mqHeader->mq_data_size = mqsize;
@@ -250,9 +259,15 @@ int mf_create(char *mqname, int mqsize) {
     mqHeader->qid = fixedPortion->unique_id++;
     printf("\nCREATE INFO: mqname=%s    offset=%ld   start=%ld    end=%ld\n", mqHeader->mq_name, offset, mqHeader->start_pos_of_queue, mqHeader->end_pos_of_queue);
     printf("\nshmem_end:%ld\n",fixedPortion->config.shmem_size);
-    for (int i = 0; i < 2; i++) {
+    for (int i = 0; i < 16; i++) {
         mqHeader->processes[i] = -1; //initalize empty processes.
     }
+
+    pthread_mutexattr_t mattr;
+    pthread_mutexattr_init(&mattr);
+    pthread_mutexattr_setpshared(&mattr, PTHREAD_PROCESS_SHARED);
+    pthread_mutex_init(&mqHeader->mutex, &mattr);
+    pthread_mutexattr_destroy(&mattr);  
 
     if (sem_init(&mqHeader->QueueSem, 1, 1) != 0) {
         perror("Failed to initialize QueueSem semaphore");
@@ -282,7 +297,8 @@ int mf_remove(char *mqname) {
         fprintf(stderr, "Message queue not found: %s\n", mqname);
         return -1; // Queue not found
     }
-    
+    pthread_mutex_destroy(&mqHeader->mutex);
+
     // BU GEREKLİ Mİİ
 
     /*  if (mqHeader->active_count > 0) {
@@ -309,19 +325,24 @@ int mf_open(char* mqname) {
     pid_t pid = getpid();
     printf("LOG2: %d", pid);
     fflush(stdout);
+    pthread_mutex_lock(&mqHeader->mutex);
+
     // Check if this PID is already in the list of active processes
-    for (int i = 0; i < 2; i++) {
+    for (int i = 0; i < 16; i++) {
         if (mqHeader->processes[i] == pid) {
+            pthread_mutex_unlock(&mqHeader->mutex);
             return mqHeader->qid;
         }
     }
 
-    for (int i = 0; i < 2; i++) {
+    for (int i = 0; i < 16; i++) {
         if (mqHeader->processes[i] == -1) {
             mqHeader->processes[i] = pid;
+            pthread_mutex_unlock(&mqHeader->mutex);
             return mqHeader->qid;
         }
     }
+    pthread_mutex_unlock(&mqHeader->mutex);
     fprintf(stderr, "Cannot connect process to message queue : %s, It already have sender and receiver.\n", mqname);
     return -1;
 }
@@ -334,14 +355,16 @@ int mf_close(int qid) {
     }
     
     pid_t pid = getpid();
-    for (int i = 0; i < 2; i++) {
+    pthread_mutex_lock(&mqHeader->mutex);
+    for (int i = 0; i < 16; i++) {
         if (mqHeader->processes[i] == pid) {
             // Found the PID, remove it from the list of active processes
             mqHeader->processes[i] = -1;
+            pthread_mutex_unlock(&mqHeader->mutex);
             return MF_SUCCESS; 
         }
     }
-    
+    pthread_mutex_unlock(&mqHeader->mutex);
     fprintf(stderr, "Process (PID: %d) did not have MQ open.\n", pid);
     return -1; // PID was not found in the list of active processes
 }
@@ -355,6 +378,19 @@ int mf_send(int qid, void *bufptr, int datalen) {
 
     MessageQueueHeader* mqHeader = find_mq_header_by_qid(qid, shmem);
     if (!mqHeader) return MF_ERROR;
+
+    pid_t pid = getpid();
+    int process_found = 0;
+    for (int i = 0; i < 16; i++) {
+        if (mqHeader->processes[i] == pid) {
+            process_found = 1;
+            break;
+        }
+    }
+    if (!process_found) {
+        fprintf(stderr, "Process has not opened the MQ.\n");
+        return -1;
+    }
 
     sem_wait(&mqHeader->QueueSem); // Ensure exclusive access to the queue.
 
@@ -391,6 +427,19 @@ int mf_recv(int qid, void *bufptr, int bufsize) {
 
     MessageQueueHeader* mqHeader = find_mq_header_by_qid(qid, shmem);
     if (!mqHeader) return MF_ERROR;
+
+    pid_t pid = getpid();
+    int process_found = 0;
+    for (int i = 0; i < 16; i++) {
+        if (mqHeader->processes[i] == pid) {
+            process_found = 1;
+            break;
+        }
+    }
+    if (!process_found) {
+        fprintf(stderr, "Process has not opened the queue.\n");
+        return -1;
+    }
 
     sem_wait(&mqHeader->ZeroSem);
     sem_wait(&mqHeader->QueueSem); // Ensure exclusive access to the queue.
@@ -471,12 +520,12 @@ MessageQueueHeader* find_mq_header_by_qid(int qid, void* shmem_base) {
     while (current_position < end_of_shmem) {
         MessageQueueHeader* mqHeader = (MessageQueueHeader*)current_position;
 
-        if (mqHeader->qid == qid) {
+        if (mqHeader->qid == qid && strcmp(mqHeader->mq_signature, "mq_signature") == 0) {
             return mqHeader;
         }
         // Geçerli queue'un bitişinden sonra yeni bir queue başlayabilir
         // mqHeader->end_pos_of_queue + 1 ile sonraki potansiyel başlangıç noktasına geç
-        current_position = (char*)shmem_base + mqHeader->end_pos_of_queue + 1; //+1 neden???
+        current_position += 1;
     }
     return NULL;
 }
@@ -488,7 +537,7 @@ MessageQueueHeader* find_mq_header_by_name(const char* mqname) {
     while (current_position < end_of_shmem) {
         MessageQueueHeader* mqHeader = (MessageQueueHeader*)current_position;
 
-        if (strncmp(mqHeader->mq_name, mqname, MAX_MQNAMESIZE) == 0) {
+        if (strncmp(mqHeader->mq_name, mqname, MAX_MQNAMESIZE) == 0 && strcmp(mqHeader->mq_signature, "mq_signature") == 0) {
             return mqHeader; 
         }
         current_position += 1;
