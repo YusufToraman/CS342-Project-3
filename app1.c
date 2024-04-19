@@ -93,6 +93,7 @@ void test_messageflow_2p1mq()
     mf_disconnect(); 
 }
 
+
 void test_messageflow_4p2mq()
 {
     int ret1, qid;
@@ -116,14 +117,19 @@ void test_messageflow_4p2mq()
         mf_connect();
         qid = mf_open("mq1");
         while (1) {
-            n_sent = rand() % MAX_DATALEN;
+            while(1){
+                n_sent = rand() % MAX_DATALEN;
+                if(n_sent >= MIN_DATALEN && n_sent <= MAX_DATALEN) break;
+            }
             mf_send(qid, (void *) sendbuffer, n_sent);
+            printf("\nsentcount:%d\n", sentcount);
             sentcount++;
             if (sentcount == totalcount)
                 break;
         }
         printf("\nNERDESIN PANKO 1\n");
         mf_close(qid);
+        printf("\nCLOSED 1\n");
         mf_disconnect();
         exit(0);
     }
@@ -138,11 +144,13 @@ void test_messageflow_4p2mq()
         while (1) {
             mf_recv(qid, (void *) recvbuffer, MAX_DATALEN);
             receivedcount++;
+            printf("\nreceivedcount:%d\n", receivedcount);
             if (receivedcount == totalcount)
                 break;
         }
         printf("\nNERDESIN PANKO 2\n");
         mf_close(qid);
+        printf("\nCLOSED 2\n");
         mf_disconnect();
         exit(0);
     }
@@ -157,7 +165,10 @@ void test_messageflow_4p2mq()
         mf_connect();
         qid = mf_open("mq2");
         while (1) {
-            n_sent = rand() % MAX_DATALEN;
+            while(1){
+                n_sent = rand() % MAX_DATALEN;
+                if(n_sent >= MIN_DATALEN && n_sent <= MAX_DATALEN) break;
+            }
             mf_send(qid, (void *) sendbuffer, n_sent);
             sentcount++;
             if (sentcount == totalcount)
@@ -165,6 +176,7 @@ void test_messageflow_4p2mq()
         }
         printf("\nNERDESIN PANKO 3\n");
         mf_close(qid);
+        printf("\nCLOSED 3\n");
         mf_disconnect();
         exit(0);
     }
@@ -184,6 +196,7 @@ void test_messageflow_4p2mq()
         }
         printf("\nNERDESIN PANKO 4\n");
         mf_close(qid);
+        printf("\nCLOSED 4\n");
         mf_disconnect();
         exit(0);
     }
@@ -191,17 +204,7 @@ void test_messageflow_4p2mq()
     for (i = 0; i < 4; ++i)
         wait(NULL);
     
-    mf_create ("mq3", 128); //  create mq;  size in KB
-    mf_create("mq4", 128);
-    mf_create("mq5", 128);
-    mf_create("mq6",128);
-    mf_remove ("mq3"); //  create mq;  size in KB
-    mf_create("mq7",128);
-    mf_remove("mq5");
-    mf_remove("mq4");
-    mf_remove("mq6");
     mf_remove("mq1");
     mf_remove("mq2");
-    mf_remove("mq7");
     mf_disconnect();
 }

@@ -223,7 +223,7 @@ int mf_disconnect() {
 }
 
 int mf_create(char *mqname, int mqsize) {
-    mqsize  = mqsize * 1024;
+    mqsize  = mqsize * 1024 + 1;
 
     FixedPortion* fixedPortion = (FixedPortion*)shmem;
     size_t requiredSize = sizeof(MessageQueueHeader) + mqsize;
