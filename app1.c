@@ -209,5 +209,9 @@ void test_messageflow_4p2mq()
     
     mf_remove("mq1");
     mf_remove("mq2");
+    mf_create("mq3", 128);
+    mf_remove("mq3");
+    mf_disconnect();
+
     mf_disconnect();
 }
