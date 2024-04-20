@@ -60,7 +60,10 @@ void test_messageflow_2p1mq()
         mf_connect();
         qid = mf_open("mq1");
         while (1) {
-            n_sent = rand() % MAX_DATALEN;
+            while(1){
+                n_sent = rand() % MAX_DATALEN;
+                if(n_sent >= MIN_DATALEN && n_sent <= MAX_DATALEN) break;
+            }
             mf_send(qid, (void *) sendbuffer, n_sent);
             sentcount++;
             if (sentcount == totalcount)

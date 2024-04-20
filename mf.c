@@ -298,6 +298,18 @@ int mf_remove(char *mqname) {
         return -1; // Queue not found
     }
     pthread_mutex_destroy(&mqHeader->mutex);
+    // Destroy the semaphores
+    if (sem_destroy(&mqHeader->QueueSem) != 0) {
+        perror("Failed to destroy QueueSem semaphore");
+    }
+
+    if (sem_destroy(&mqHeader->SpaceSem) != 0) {
+        perror("Failed to destroy SpaceSem semaphore");
+    }
+
+    if (sem_destroy(&mqHeader->ZeroSem) != 0) {
+        perror("Failed to destroy ZeroSem semaphore");
+    }
 
     // BU GEREKLİ Mİİ
 
@@ -379,6 +391,8 @@ int mf_send(int qid, void *bufptr, int datalen) {
     MessageQueueHeader* mqHeader = find_mq_header_by_qid(qid, shmem);
     if (!mqHeader) return MF_ERROR;
 
+    sem_wait(&mqHeader->QueueSem); // Ensure exclusive access to the queue.
+
     pid_t pid = getpid();
     int process_found = 0;
     for (int i = 0; i < 16; i++) {
@@ -391,8 +405,6 @@ int mf_send(int qid, void *bufptr, int datalen) {
         fprintf(stderr, "Process has not opened the MQ.\n");
         return -1;
     }
-
-    sem_wait(&mqHeader->QueueSem); // Ensure exclusive access to the queue.
 
     mqHeader->spaceSemIndicator = 0;
     
@@ -428,6 +440,9 @@ int mf_recv(int qid, void *bufptr, int bufsize) {
     MessageQueueHeader* mqHeader = find_mq_header_by_qid(qid, shmem);
     if (!mqHeader) return MF_ERROR;
 
+    sem_wait(&mqHeader->ZeroSem);
+    sem_wait(&mqHeader->QueueSem); // Ensure exclusive access to the queue.
+
     pid_t pid = getpid();
     int process_found = 0;
     for (int i = 0; i < 16; i++) {
@@ -440,9 +455,6 @@ int mf_recv(int qid, void *bufptr, int bufsize) {
         fprintf(stderr, "Process has not opened the queue.\n");
         return -1;
     }
-
-    sem_wait(&mqHeader->ZeroSem);
-    sem_wait(&mqHeader->QueueSem); // Ensure exclusive access to the queue.
     
     int msgSize = dequeue_message(mqHeader, bufptr, bufsize, shmem);
     
