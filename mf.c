@@ -345,21 +345,24 @@ int mf_remove(char *mqname) {
     MessageQueueHeader* mqHeader = find_mq_header_by_name(mqname);
     if (mqHeader == NULL) {
         fprintf(stderr, "Message queue not found: %s\n", mqname);
-        return -1; // Queue not found
+        return MF_ERROR; // Queue not found
     }
     // Destroy the mutex lock
     pthread_mutex_destroy(&mqHeader->mutex);
     // Destroy the semaphores
     if (sem_destroy(&mqHeader->QueueSem) != 0) {
         perror("Failed to destroy QueueSem semaphore");
+        return MF_ERROR;
     }
 
     if (sem_destroy(&mqHeader->SpaceSem) != 0) {
         perror("Failed to destroy SpaceSem semaphore");
+        return MF_ERROR;
     }
 
     if (sem_destroy(&mqHeader->ZeroSem) != 0) {
         perror("Failed to destroy ZeroSem semaphore");
+        return MF_ERROR;
     }
     printf("Message Queue %s removed successfully.\n", mqHeader->mq_name);
     add_new_hole(mqHeader, fixedPortion);
@@ -396,7 +399,7 @@ int mf_open(char* mqname) {
     }
     pthread_mutex_unlock(&mqHeader->mutex);
     fprintf(stderr, "Cannot open the message queue : %s, Active process count is 16.\n", mqname);
-    return -1;
+    return MF_ERROR;;
 }
 
 int mf_close(int qid) {
@@ -417,7 +420,7 @@ int mf_close(int qid) {
     }
     pthread_mutex_unlock(&mqHeader->mutex);
     fprintf(stderr, "Process (PID: %d) did not have MQ open.\n", pid);
-    return -1;
+    return MF_ERROR;;
 }
 
 
@@ -425,7 +428,7 @@ int mf_send(int qid, void *bufptr, int datalen) {
     FixedPortion* fixedPortion = (FixedPortion*)shmem;
     if (datalen > MAX_DATALEN || datalen < MIN_DATALEN) {
         perror("Message size out of bounds.");
-        return -1;
+        return MF_ERROR;
     }
 
     MessageQueueHeader* mqHeader = find_mq_header_by_qid(qid, shmem);
@@ -443,7 +446,7 @@ int mf_send(int qid, void *bufptr, int datalen) {
     }
     if (!process_found) {
         fprintf(stderr, "Process has not opened the MQ.\n");
-        return -1;
+        return MF_ERROR;
     }
 
     mqHeader->spaceSemIndicator = 0;
@@ -474,14 +477,14 @@ int mf_send(int qid, void *bufptr, int datalen) {
 int mf_recv(int qid, void *bufptr, int bufsize) {
     if (bufsize > MAX_DATALEN || bufsize < MIN_DATALEN) {
         perror("Message size out of bounds.");
-        return -1;
+        return MF_ERROR;
     }
 
     MessageQueueHeader* mqHeader = find_mq_header_by_qid(qid, shmem);
     if (!mqHeader) return MF_ERROR;
 
     sem_wait(&mqHeader->ZeroSem);
-    sem_wait(&mqHeader->QueueSem); // exclusive access to the queue
+    sem_wait(&mqHeader->QueueSem);
 
     pid_t pid = getpid();
     int process_found = 0;
@@ -493,7 +496,7 @@ int mf_recv(int qid, void *bufptr, int bufsize) {
     }
     if (!process_found) {
         fprintf(stderr, "This process has not opened the queue.\n");
-        return -1;
+        return MF_ERROR;
     }
     
     int msgSize = dequeue_message(mqHeader, bufptr, bufsize, shmem);
