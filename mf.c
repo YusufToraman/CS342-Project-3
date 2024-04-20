@@ -383,6 +383,7 @@ int mf_send(int qid, void *bufptr, int datalen) {
 
     MessageQueueHeader* mqHeader = find_mq_header_by_qid(qid, shmem);
     if (!mqHeader) return MF_ERROR;
+    printf("mqheader %d", mqHeader->qid);
 
     sem_wait(&mqHeader->QueueSem); // Ensure exclusive access to the queue.
 

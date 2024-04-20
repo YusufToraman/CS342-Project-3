@@ -8,86 +8,83 @@
 #include <semaphore.h>
 #include <sys/mman.h>
 #include <time.h>
-#include <sys/types.h>
-#include <sys/wait.h>
 #include "mf.h"
 
 #define COUNT 10
+char *semname1 = "/semaphore1";
+char *semname2 = "/semaphore2";
+sem_t *sem1, *sem2;
+char *mqname1 = "msgqueue1";
 
-int totalcount = COUNT;
-
-void test_messageflow_2p1mq();
-
-int main(int argc, char **argv)
-{
-    totalcount = COUNT;
-    if (argc != 2) {
-        printf ("usage: app2 numberOfMessages\n");
-        exit(1);
-    }
+int main(int argc, char **argv) {
+    int ret, qid;
+    char sendbuffer[MAX_DATALEN];
+    char recvbuffer[MAX_DATALEN];
+    int sentcount = 0;
+    int receivedcount = 0;
+    int totalcount = COUNT;
+    
     if (argc == 2)
         totalcount = atoi(argv[1]);
 
+    sem1 = sem_open(semname1, O_CREAT, 0666, 0); // Initialize semaphore
+    sem2 = sem_open(semname2, O_CREAT, 0666, 0); // Initialize semaphore
+
     srand(time(0));
-
-    test_messageflow_2p1mq();
-
-	return 0;
-}
-
-
-void test_messageflow_2p1mq()
-{
-    int ret1,   qid;
-    char sendbuffer[MAX_DATALEN];
-    int n_sent;
-    char recvbuffer[MAX_DATALEN];
-    int sentcount = 0; 
-    int receivedcount = 0; 
-    int i;
+    printf("RAND_MAX is %d\n", RAND_MAX);
     
-    mf_connect();
-    mf_create ("mq1", 16); //  create mq;  size in KB
-
-    ret1 = fork();
-    if (ret1 ==  0) {
-        //  process - P1
-        //  will create a message queue
+    ret = fork();
+    if (ret > 0) {
+        // Parent process - P1
         mf_connect();
-        qid = -1;
-        while (1) {
-            while(1){
-                n_sent = rand() % MAX_DATALEN;
-                if(n_sent >= MIN_DATALEN && n_sent <= MAX_DATALEN) break;
+        mf_create(mqname1, 16); // Create mq; 16 KB
+        qid = mf_open(mqname1);
+        sem_post(sem1); // Signal child process that queue is ready
+        
+        for (sentcount = 1; sentcount <= totalcount; sentcount++) {
+            // Prepare the message to be sent
+            snprintf(sendbuffer, sizeof(sendbuffer), "Message number %d", sentcount);
+            int n_sent = strlen(sendbuffer) + 1; // +1 for null terminator
+            
+            // Ensure message size is within bounds
+            if (n_sent < MIN_DATALEN || n_sent > MAX_DATALEN) {
+                fprintf(stderr, "Message size out of bounds.\n");
+                continue; // Skip this message
             }
-            mf_send(qid, (void *) sendbuffer, n_sent);
-            sentcount++;
-            if (sentcount == totalcount)
-                break;
+            
+            // Send the message
+            ret = mf_send(qid, (void *)sendbuffer, n_sent);
+            if (ret != 0) {
+                fprintf(stderr, "Failed to send message\n");
+                break; // Exit the loop in case of failure
+            }
+            
+            printf("\napp sent message, datalen=%d sentcount=%d\n", n_sent, sentcount);
         }
+        
         mf_close(qid);
+        sem_wait(sem2); // Wait for child process to finish receiving messages
+        mf_remove(mqname1);   // Remove mq
         mf_disconnect();
-        exit(0);
-    }
-    ret1  = fork();
-    if (ret1 == 0) {
-        //  process - P2
+    } 
+    else if (ret == 0) {
+        // Child process - P2
+        sem_wait(sem1); // Wait for parent process to signal that queue is ready
         mf_connect();
-        qid = mf_open("mq1");
-        while (1) {
-            mf_recv(qid, (void *) recvbuffer, MAX_DATALEN);
-            receivedcount++;
-            if (receivedcount == totalcount)
-                break;
+        qid = mf_open(mqname1);
+        
+        while (receivedcount < totalcount) {
+            int n_received = mf_recv(qid, (void *)recvbuffer, MAX_DATALEN);
+            if (n_received > 0) {
+                printf("app received message, datalen=%d\n", n_received);
+                printf("%s\n", recvbuffer); // Display the received message
+                receivedcount++;
+            }
         }
+        
         mf_close(qid);
         mf_disconnect();
-        exit(0);
+        sem_post(sem2); // Signal parent process that messages have been received
     }
-    
-    for (i = 0; i < 2; ++i)
-        wait(NULL);
-    
-    mf_remove("mq1");
-    mf_disconnect(); 
+    return 0;
 }
