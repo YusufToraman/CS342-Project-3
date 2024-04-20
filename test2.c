@@ -36,7 +36,12 @@ int main(int argc, char **argv) {
     ret = fork();
     if (ret > 0) {
         mf_connect();
-        mf_create(mqname1, 16);
+        int mq1 = mf_create(mqname1, 16);
+        if(mq1 != 0)
+        {
+            fprintf(stderr, "MF Create Error.\n");
+            return -1;
+        }
         qid = mf_open(mqname1);
         sem_post(sem1);
         
