@@ -280,7 +280,7 @@ int mf_create(char *mqname, int mqsize) {
     }
 
     fixedPortion->mq_count++; 
-    return mqHeader->qid;
+    return MF_SUCCESS;
 }
 
 int mf_remove(char *mqname) {
@@ -319,8 +319,6 @@ int mf_remove(char *mqname) {
 
     return MF_SUCCESS;
 }
-
-
 
 int mf_open(char* mqname) {
     MessageQueueHeader* mqHeader = find_mq_header_by_name(mqname);
