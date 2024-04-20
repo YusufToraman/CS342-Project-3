@@ -22,8 +22,6 @@ void enqueue_message(MessageQueueHeader* mqHeader, const void* data, size_t data
         return;
     }
 
-    printf("\nI am enqueueing: %ld\n", dataSize);
-
     Message* newMessage = (Message*)((char*)shmem + mqHeader->in);
     newMessage->messageSize = dataSize;
     memcpy(newMessage->data, data, dataSize);
@@ -62,6 +60,6 @@ int dequeue_message(MessageQueueHeader* mqHeader, void* bufptr, size_t bufsize, 
         mqHeader->in = mqHeader->start_pos_of_queue;
         mqHeader->out = mqHeader->start_pos_of_queue;
     }
-
+    mqHeader->total_message_no--;
     return message->messageSize;
 }

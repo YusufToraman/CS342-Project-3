@@ -91,8 +91,6 @@ void mark_space_as_available(MessageQueueHeader* mqHeader, FixedPortion* fixedPo
     }
 }
 
-
-
 size_t find_free_space_for_queue(FixedPortion* fixedPortion, size_t requestedSize) {
     size_t prevOffset = 0;
     size_t currentOffset = fixedPortion->holeManager.firstHoleOffset;
@@ -231,7 +229,7 @@ int mf_create(char *mqname, int mqsize) {
     size_t requiredSize = sizeof(MessageQueueHeader) + mqsize;
     size_t offset = find_free_space_for_queue(fixedPortion, requiredSize);
 
-    if (offset == (size_t)-1) {
+    if (offset == (size_t)-1 || fixedPortion->config.max_queues_in_shmem <= fixedPortion->mq_count) {
         return MF_ERROR;
     }
     MessageQueueHeader* mqHeader = (MessageQueueHeader*)((char*)shmem + offset);
@@ -305,15 +303,6 @@ int mf_remove(char *mqname) {
     if (sem_destroy(&mqHeader->ZeroSem) != 0) {
         perror("Failed to destroy ZeroSem semaphore");
     }
-
-    // BU GEREKLİ Mİİ
-
-    /*  if (mqHeader->active_count > 0) {
-        fprintf(stderr, "Message queue is still in use: %s\n", mqname);
-        return -1; // Queue is still in use
-    } */
-    
-    // BU METHOD YAZILMASI LAZIM YANİ BUNUN YERİNİ HOLE LİST E GERİ KOYCAZ.
     mark_space_as_available(mqHeader, fixedPortion);
     fixedPortion->mq_count--;
 
@@ -376,6 +365,7 @@ int mf_close(int qid) {
 
 
 int mf_send(int qid, void *bufptr, int datalen) {
+    FixedPortion* fixedPortion = (FixedPortion*)shmem;
     if (datalen > MAX_DATALEN || datalen < MIN_DATALEN) {
         perror("Message size out of bounds.");
         return -1;
@@ -405,7 +395,7 @@ int mf_send(int qid, void *bufptr, int datalen) {
     size_t requiredSpace = sizeof(Message) + datalen;
     size_t availableSpace = calculate_available_space(mqHeader, requiredSpace);
     // Ideally, check for space here again as conditions might have changed.
-    while ((int)requiredSpace > (int)availableSpace) {
+    while ((int)requiredSpace > (int)availableSpace || fixedPortion->config.max_msgs_in_queue <= mqHeader->total_message_no) {
         printf("\033[43mBEKLIYOR MUUYUMMM\033[0m \n");
         mqHeader->requiredSpace = requiredSpace;
         mqHeader->spaceSemIndicator = 1;
@@ -463,10 +453,48 @@ int mf_recv(int qid, void *bufptr, int bufsize) {
     return msgSize;
 }
 
-int mf_print()
-{
-    return (0);
+int mf_print() {
+    FixedPortion* fixedPortion = (FixedPortion*)shmem;
+    printf("Shared Memory Name: %s\n", fixedPortion->config.shmem_name);
+    printf("Shared Memory Size: %zu bytes\n", fixedPortion->config.shmem_size);
+    printf("Max Message Queues: %d\n", fixedPortion->config.max_queues_in_shmem);
+    printf("Max Messages in Queue: %d\n", fixedPortion->config.max_msgs_in_queue);
+    printf("Current Message Queue Count: %d\n", fixedPortion->mq_count);
+
+    char* current_position = (char*)shmem + sizeof(FixedPortion);
+    char* end_of_shmem = (char*)shmem + fixedPortion->config.shmem_size;
+
+    while (current_position < end_of_shmem) {
+        MessageQueueHeader* mqHeader = (MessageQueueHeader*)current_position;
+        if (strcmp(mqHeader->mq_signature, "mq_signature") == 0) {
+            printf("\nMessage Queue ID: %d\n", mqHeader->qid);
+            printf("Queue Name: %s\n", mqHeader->mq_name);
+            printf("Queue Start Offset: %zu\n", mqHeader->mq_start_offset);
+            printf("Queue Data Start: %zu\n", mqHeader->start_pos_of_queue);
+            printf("Queue Data End: %zu\n", mqHeader->end_pos_of_queue);
+            printf("Data Size: %zu\n", mqHeader->mq_data_size);
+            printf("In Pointer: %zu\n", mqHeader->in);
+            printf("Out Pointer: %zu\n", mqHeader->out);
+            printf("Total Messages: %d\n", mqHeader->total_message_no);
+            printf("Processes Registered: ");
+            for (int i = 0; i < 16; i++) {
+                if (mqHeader->processes[i] != -1) {
+                    printf("%d ", mqHeader->processes[i]);
+                }
+            }
+            printf("\n");
+        }
+        current_position += 1;   
+    }
+
+    // Optionally print information about holes
+    size_t holeOffset = fixedPortion->holeManager.firstHoleOffset;
+    printf("\nFirst Hole offset: %ld\n", holeOffset);
+
+
+    return 0;
 }
+
 
 
 static ConfigParams read_config(const char* filename) {
