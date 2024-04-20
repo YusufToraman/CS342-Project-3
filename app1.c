@@ -109,6 +109,7 @@ void test_messageflow_4p2mq()
     mf_connect();
     mf_create ("mq1", 16); //  create mq;  size in KB
     mf_create ("mq2", 16); //  create mq;  size in KB
+    mf_print();
 
     ret1 = fork();
     if (ret1 == 0) {
@@ -124,14 +125,11 @@ void test_messageflow_4p2mq()
                 if(n_sent >= MIN_DATALEN && n_sent <= MAX_DATALEN) break;
             }
             mf_send(qid, (void *) sendbuffer, n_sent);
-            printf("\nsentcount:%d\n", sentcount);
             sentcount++;
             if (sentcount == totalcount)
                 break;
         }
-        printf("\nNERDESIN PANKO 1\n");
         mf_close(qid);
-        printf("\nCLOSED 1\n");
         mf_disconnect();
         exit(0);
     }
@@ -146,13 +144,10 @@ void test_messageflow_4p2mq()
         while (1) {
             mf_recv(qid, (void *) recvbuffer, MAX_DATALEN);
             receivedcount++;
-            printf("\nreceivedcount:%d\n", receivedcount);
             if (receivedcount == totalcount)
                 break;
         }
-        printf("\nNERDESIN PANKO 2\n");
         mf_close(qid);
-        printf("\nCLOSED 2\n");
         mf_disconnect();
         exit(0);
     }
@@ -176,9 +171,7 @@ void test_messageflow_4p2mq()
             if (sentcount == totalcount)
                 break;
         }
-        printf("\nNERDESIN PANKO 3\n");
         mf_close(qid);
-        printf("\nCLOSED 3\n");
         mf_disconnect();
         exit(0);
     }
@@ -196,20 +189,15 @@ void test_messageflow_4p2mq()
             if (receivedcount == totalcount)
                 break;
         }
-        printf("\nNERDESIN PANKO 4\n");
         mf_close(qid);
-        printf("\nCLOSED 4\n");
         mf_disconnect();
         exit(0);
     }
-    printf("\nHADI BAKIM\n");
     for (i = 0; i < 4; ++i)
         wait(NULL);
     
     mf_remove("mq1");
     mf_remove("mq2");
-    mf_create("mq3", 128);
-    mf_remove("mq3");
     mf_disconnect();
 
     mf_disconnect();

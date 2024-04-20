@@ -13,6 +13,7 @@
 #include <pthread.h>
 
 #define MQ_SIGNATURE_SIZE 13
+#define NEXT_MQ_STEP 1
 
 typedef struct {
     size_t messageSize;                    

@@ -14,16 +14,16 @@
 
 #define MF_SUCCESS 0 
 #define MF_ERROR -1
-
+#define MAX_PROCESSES 16
 
 typedef struct {
-    size_t start; // Offset to the start of the hole
-    size_t size;  // Size of the hole
-    size_t next;  // Offset to the next hole, 0 if this is the last
+    size_t start;
+    size_t size;
+    size_t next;
 } Hole;
 
 typedef struct {
-    size_t firstHoleOffset; // Offset of the first hole in the list, 0 if no holes
+    size_t firstHoleOffset;
 } HoleManager;
 
 typedef struct {
@@ -38,6 +38,8 @@ typedef struct {
     int unique_id;
     ConfigParams config;
     HoleManager holeManager;
+    pid_t active_processes[MAX_PROCESSES];
+    pthread_mutex_t process_mutex;
 } FixedPortion;
 
 void *shmem = NULL;
@@ -47,19 +49,19 @@ static void* create_shared_memory(const char* name, size_t size);
 MessageQueueHeader* find_mq_header_by_qid(int qid, void* shmem_base);
 MessageQueueHeader* find_mq_header_by_name(const char* mqname);
 size_t find_free_space_for_queue(FixedPortion* fixedPortion, size_t requestedSize);
+void add_new_hole(MessageQueueHeader* mqHeader, FixedPortion* fixedPortion);
+void initialize_hole_manager(FixedPortion* fixedPortion, size_t totalShmemSize);
 
-void mark_space_as_available(MessageQueueHeader* mqHeader, FixedPortion* fixedPortion) {
+void add_new_hole(MessageQueueHeader* mqHeader, FixedPortion* fixedPortion) {
     size_t total_size = sizeof(MessageQueueHeader) + mqHeader->mq_data_size;
-    size_t mqStartOffset = mqHeader->mq_start_offset; // Calculate offset of mqHeader in shared memory
+    size_t mqStartOffset = mqHeader->mq_start_offset; 
     memset(mqHeader, 0, total_size);
 
-    // Define new hole at the location of the MessageQueueHeader being freed
     Hole* newHole = (Hole*)((char*)shmem + mqStartOffset);
     newHole->start = mqStartOffset;
     newHole->size = total_size;
     newHole->next = 0;
 
-    // Traverse the hole list to find the correct insertion point
     size_t currentOffset = fixedPortion->holeManager.firstHoleOffset;
     Hole* currentHole = (Hole*)((char*)shmem + currentOffset);
     Hole* prevHole = NULL;
@@ -70,20 +72,20 @@ void mark_space_as_available(MessageQueueHeader* mqHeader, FixedPortion* fixedPo
         currentHole = (currentOffset != 0) ? (Hole*)((char*)shmem + currentOffset) : NULL;
     }
 
-    // Insert new hole into the list
     if (prevHole) {
         newHole->next = prevHole->next;
         prevHole->next = newHole->start;
-    } else {
+    } 
+    else
+    {
         newHole->next = fixedPortion->holeManager.firstHoleOffset;
         fixedPortion->holeManager.firstHoleOffset = newHole->start;
     }
 
-    // Check for and merge with any adjacent holes
     if (prevHole && prevHole->start + prevHole->size == newHole->start) {
         prevHole->size += newHole->size;
         prevHole->next = newHole->next;
-        newHole = prevHole; // Update newHole to the merged hole
+        newHole = prevHole;
     }
     if (currentHole && newHole->start + newHole->size == currentHole->start) {
         newHole->size += currentHole->size;
@@ -115,7 +117,9 @@ size_t find_free_space_for_queue(FixedPortion* fixedPortion, size_t requestedSiz
                     Hole* prevHole = (Hole*)((char*)shmem + prevOffset);
                     prevHole->next = newHoleOffset;
                 }
-            } else {
+            } 
+            else 
+            {
                 if (prevOffset == 0) {
                     fixedPortion->holeManager.firstHoleOffset = hole->next;
                 } else {
@@ -130,7 +134,7 @@ size_t find_free_space_for_queue(FixedPortion* fixedPortion, size_t requestedSiz
         currentOffset = hole->next;
     }
 
-    return (size_t)-1;  // No suitable space found
+    return (size_t)-1;  // No suitable space
 }
 
 
@@ -140,9 +144,9 @@ void initialize_hole_manager(FixedPortion* fixedPortion, size_t totalShmemSize) 
 
     Hole* firstHole = (Hole*)((void*)shmem + firstHoleOffset);
 
-    firstHole->start = firstHoleOffset; // Start of the hole in offset terms
-    firstHole->size = totalShmemSize - startOfFreeSpace; // Size of the hole
-    firstHole->next = 0; // Indicate that this is the only hole for now
+    firstHole->start = firstHoleOffset; 
+    firstHole->size = totalShmemSize - startOfFreeSpace;
+    firstHole->next = 0;
 
     fixedPortion->holeManager.firstHoleOffset = firstHoleOffset;
 }
@@ -194,7 +198,6 @@ int mf_connect() {
         return MF_ERROR;
     }
 
-    // mmap ile paylaşılan belleği süreç adres alanına eşle
     shmem = mmap(NULL, config.shmem_size, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
     if (shmem == MAP_FAILED) {
         perror("Error mapping shared memory");
@@ -204,6 +207,7 @@ int mf_connect() {
     close(shm_fd);
     return MF_SUCCESS;
 }
+
    
 int mf_disconnect() {
     FixedPortion* fixedPortion = (FixedPortion*)shmem;
@@ -218,6 +222,7 @@ int mf_disconnect() {
 
     return MF_SUCCESS;
 }
+
 
 int mf_create(char *mqname, int mqsize) {
     if(mqsize < MIN_MQSIZE || mqsize > MAX_MQSIZE){
@@ -250,8 +255,7 @@ int mf_create(char *mqname, int mqsize) {
     mqHeader->requiredSpace = 0;
     mqHeader->total_message_no = 0;
     mqHeader->qid = fixedPortion->unique_id++;
-    printf("\nCREATE INFO: mqname=%s    offset=%ld   start=%ld    end=%ld\n", mqHeader->mq_name, offset, mqHeader->start_pos_of_queue, mqHeader->end_pos_of_queue);
-    printf("\nshmem_end:%ld\n",fixedPortion->config.shmem_size);
+    printf("\033[32mCREATE INFO:\033[0m mqname=%s   offset=%ld   start=%ld    end=%ld\n", mqHeader->mq_name, offset, mqHeader->start_pos_of_queue, mqHeader->end_pos_of_queue);
     for (int i = 0; i < 16; i++) {
         mqHeader->processes[i] = -1; //initalize empty processes.
     }
@@ -264,17 +268,17 @@ int mf_create(char *mqname, int mqsize) {
 
     if (sem_init(&mqHeader->QueueSem, 1, 1) != 0) {
         perror("Failed to initialize QueueSem semaphore");
-        exit(EXIT_FAILURE);
+        return MF_ERROR;
     }
     
     if (sem_init(&mqHeader->SpaceSem, 1, 0) != 0) {
         perror("Failed to initialize SpaceSem semaphore");
-        exit(EXIT_FAILURE);
+        return MF_ERROR;
     }
 
     if (sem_init(&mqHeader->ZeroSem, 1, 0) != 0) {
         perror("Failed to initialize SpaceSem semaphore");
-        exit(EXIT_FAILURE);
+        return MF_ERROR;
     }
 
     fixedPortion->mq_count++; 
@@ -283,13 +287,12 @@ int mf_create(char *mqname, int mqsize) {
 
 int mf_remove(char *mqname) {
     FixedPortion* fixedPortion = (FixedPortion*)shmem;
-    printf("\nREMOVE 1: shmemname:%s\n", fixedPortion->config.shmem_name);
     MessageQueueHeader* mqHeader = find_mq_header_by_name(mqname);
-    printf("\nREMOVE 2: mqHeader.name:%s\n", mqHeader->mq_name);
     if (mqHeader == NULL) {
         fprintf(stderr, "Message queue not found: %s\n", mqname);
         return -1; // Queue not found
     }
+    // Destroy the mutex lock
     pthread_mutex_destroy(&mqHeader->mutex);
     // Destroy the semaphores
     if (sem_destroy(&mqHeader->QueueSem) != 0) {
@@ -303,7 +306,8 @@ int mf_remove(char *mqname) {
     if (sem_destroy(&mqHeader->ZeroSem) != 0) {
         perror("Failed to destroy ZeroSem semaphore");
     }
-    mark_space_as_available(mqHeader, fixedPortion);
+    printf("Message Queue %s removed successfully.\n", mqHeader->mq_name);
+    add_new_hole(mqHeader, fixedPortion);
     fixedPortion->mq_count--;
 
     return MF_SUCCESS;
@@ -312,16 +316,14 @@ int mf_remove(char *mqname) {
 int mf_open(char* mqname) {
     MessageQueueHeader* mqHeader = find_mq_header_by_name(mqname);
     if (mqHeader == NULL) {
-        fprintf(stderr, "Open Message queue not found: %s\n", mqname);
+        fprintf(stderr, "Message Queue not found: %s\n, open", mqname);
         return -1;
     }
     
     pid_t pid = getpid();
-    printf("LOG2: %d", pid);
-    fflush(stdout);
     pthread_mutex_lock(&mqHeader->mutex);
 
-    // Check if this PID is already in the list of active processes
+    // if PID is already in the active process list
     for (int i = 0; i < 16; i++) {
         if (mqHeader->processes[i] == pid) {
             pthread_mutex_unlock(&mqHeader->mutex);
@@ -329,6 +331,7 @@ int mf_open(char* mqname) {
         }
     }
 
+    // if not add the PID
     for (int i = 0; i < 16; i++) {
         if (mqHeader->processes[i] == -1) {
             mqHeader->processes[i] = pid;
@@ -337,14 +340,14 @@ int mf_open(char* mqname) {
         }
     }
     pthread_mutex_unlock(&mqHeader->mutex);
-    fprintf(stderr, "Cannot connect process to message queue : %s, It already have sender and receiver.\n", mqname);
+    fprintf(stderr, "Cannot open the message queue : %s, Active process count is 16.\n", mqname);
     return -1;
 }
 
 int mf_close(int qid) {
     MessageQueueHeader* mqHeader = find_mq_header_by_qid(qid, shmem);
     if (!mqHeader) {
-        fprintf(stderr, "Close Message queue not found for QID: %d\n", qid);
+        fprintf(stderr, "Message queue not found for QID: %d\n", qid);
         return -1;
     }
     
@@ -352,7 +355,6 @@ int mf_close(int qid) {
     pthread_mutex_lock(&mqHeader->mutex);
     for (int i = 0; i < 16; i++) {
         if (mqHeader->processes[i] == pid) {
-            // Found the PID, remove it from the list of active processes
             mqHeader->processes[i] = -1;
             pthread_mutex_unlock(&mqHeader->mutex);
             return MF_SUCCESS; 
@@ -360,7 +362,7 @@ int mf_close(int qid) {
     }
     pthread_mutex_unlock(&mqHeader->mutex);
     fprintf(stderr, "Process (PID: %d) did not have MQ open.\n", pid);
-    return -1; // PID was not found in the list of active processes
+    return -1;
 }
 
 
@@ -373,9 +375,8 @@ int mf_send(int qid, void *bufptr, int datalen) {
 
     MessageQueueHeader* mqHeader = find_mq_header_by_qid(qid, shmem);
     if (!mqHeader) return MF_ERROR;
-    printf("mqheader %d", mqHeader->qid);
 
-    sem_wait(&mqHeader->QueueSem); // Ensure exclusive access to the queue.
+    sem_wait(&mqHeader->QueueSem);
 
     pid_t pid = getpid();
     int process_found = 0;
@@ -394,22 +395,22 @@ int mf_send(int qid, void *bufptr, int datalen) {
     
     size_t requiredSpace = sizeof(Message) + datalen;
     size_t availableSpace = calculate_available_space(mqHeader, requiredSpace);
-    // Ideally, check for space here again as conditions might have changed.
+
     while ((int)requiredSpace > (int)availableSpace || fixedPortion->config.max_msgs_in_queue <= mqHeader->total_message_no) {
-        printf("\033[43mBEKLIYOR MUUYUMMM\033[0m \n");
+        printf("\033[43mWAITING FOR MESSAGE QUEUE TO BE AVAILABLE FOR A NEW MESSAGE\033[0m \n");
         mqHeader->requiredSpace = requiredSpace;
         mqHeader->spaceSemIndicator = 1;
-        sem_post(&mqHeader->QueueSem); // Release exclusive access // Wait for space to be available should wait first all the time
-        sem_wait(&mqHeader->SpaceSem);
+        sem_post(&mqHeader->QueueSem); // release queue access
+        sem_wait(&mqHeader->SpaceSem); // wait for enough space
         sem_wait(&mqHeader->QueueSem);
         
         availableSpace = calculate_available_space(mqHeader, requiredSpace);
     }
     enqueue_message(mqHeader, bufptr, datalen, shmem);
-    printf("mqname %s Enqueued: %d \n", mqHeader->mq_name, datalen);
+    printf("MQ: %s, \033[32mEnqueued\033[0m the data with length: %d \n", mqHeader->mq_name, datalen);
 
     if (mqHeader->total_message_no > 0) {
-        sem_post(&mqHeader->ZeroSem); // Signal that the queue is not empty.
+        sem_post(&mqHeader->ZeroSem); // signal that queue is not empty
     }
     sem_post(&mqHeader->QueueSem);
     return MF_SUCCESS;
@@ -425,7 +426,7 @@ int mf_recv(int qid, void *bufptr, int bufsize) {
     if (!mqHeader) return MF_ERROR;
 
     sem_wait(&mqHeader->ZeroSem);
-    sem_wait(&mqHeader->QueueSem); // Ensure exclusive access to the queue.
+    sem_wait(&mqHeader->QueueSem); // exclusive access to the queue
 
     pid_t pid = getpid();
     int process_found = 0;
@@ -436,17 +437,16 @@ int mf_recv(int qid, void *bufptr, int bufsize) {
         }
     }
     if (!process_found) {
-        fprintf(stderr, "Process has not opened the queue.\n");
+        fprintf(stderr, "This process has not opened the queue.\n");
         return -1;
     }
     
     int msgSize = dequeue_message(mqHeader, bufptr, bufsize, shmem);
-    
-    printf("mqname %s Dequeued: %d \n", mqHeader->mq_name, msgSize);
+    printf("MQ: %s, \033[31mDequeued\033[0m the data with length: %d \n", mqHeader->mq_name, msgSize);
 
     if (mqHeader->spaceSemIndicator == 1 && (int)calculate_available_space(mqHeader,mqHeader->requiredSpace) >= (int)mqHeader->requiredSpace) {
         mqHeader->spaceSemIndicator =  -1;
-        sem_post(&mqHeader->SpaceSem); // indicating that enough space is created
+        sem_post(&mqHeader->SpaceSem); // enough space is created
     } 
     sem_post(&mqHeader->QueueSem);
 
@@ -455,6 +455,7 @@ int mf_recv(int qid, void *bufptr, int bufsize) {
 
 int mf_print() {
     FixedPortion* fixedPortion = (FixedPortion*)shmem;
+    printf("\033[38;5;208mSHMEM INFO:\n\033[0m");
     printf("Shared Memory Name: %s\n", fixedPortion->config.shmem_name);
     printf("Shared Memory Size: %zu bytes\n", fixedPortion->config.shmem_size);
     printf("Max Message Queues: %d\n", fixedPortion->config.max_queues_in_shmem);
@@ -467,7 +468,8 @@ int mf_print() {
     while (current_position < end_of_shmem) {
         MessageQueueHeader* mqHeader = (MessageQueueHeader*)current_position;
         if (strcmp(mqHeader->mq_signature, "mq_signature") == 0) {
-            printf("\nMessage Queue ID: %d\n", mqHeader->qid);
+            printf("\033[94mMQ INFO:\n\033[0m");
+            printf("Message Queue ID: %d\n", mqHeader->qid);
             printf("Queue Name: %s\n", mqHeader->mq_name);
             printf("Queue Start Offset: %zu\n", mqHeader->mq_start_offset);
             printf("Queue Data Start: %zu\n", mqHeader->start_pos_of_queue);
@@ -484,17 +486,14 @@ int mf_print() {
             }
             printf("\n");
         }
-        current_position += 1;   
+        current_position += NEXT_MQ_STEP;  
     }
-
-    // Optionally print information about holes
     size_t holeOffset = fixedPortion->holeManager.firstHoleOffset;
-    printf("\nFirst Hole offset: %ld\n", holeOffset);
-
+    printf("\033[38;5;200mHOLE MANAGER INFO:\n\033[0m");
+    printf("First Available Hole offset: %ld\n", holeOffset);
 
     return 0;
 }
-
 
 
 static ConfigParams read_config(const char* filename) {
@@ -518,8 +517,6 @@ static ConfigParams read_config(const char* filename) {
         if (sscanf(line, "MAX_QUEUES_IN_SHMEM %d", &config.max_queues_in_shmem) == 1) continue;
     }
 
-    printf("SHMEM_NAME: %s\nSHMEM_SIZE: %zu\nMAX_MSGS_IN_QUEUE: %d\nMAX_QUEUES_IN_SHMEM: %d", 
-    config.shmem_name, config.shmem_size, config.max_msgs_in_queue, config.max_queues_in_shmem);
     fclose(file);
     config.shmem_size *= 1024;
     return config;
@@ -545,7 +542,7 @@ static void* create_shared_memory(const char* name, size_t size) {
     return addr;
 }
 
-//SHMEM ZATEN GLOBAL, PARAMETRE VERMEYEBEİLİRZ. TEST EDERKEN İŞİMİZ KOLAYLAŞIR KAlSIN DEDİM
+
 MessageQueueHeader* find_mq_header_by_qid(int qid, void* shmem_base) {
     // Başlangıçta fixed portion'un boyutunu atlıyoruz
     char* current_position = (char*)shmem_base + sizeof(FixedPortion);
@@ -557,9 +554,7 @@ MessageQueueHeader* find_mq_header_by_qid(int qid, void* shmem_base) {
         if (mqHeader->qid == qid && strcmp(mqHeader->mq_signature, "mq_signature") == 0) {
             return mqHeader;
         }
-        // Geçerli queue'un bitişinden sonra yeni bir queue başlayabilir
-        // mqHeader->end_pos_of_queue + 1 ile sonraki potansiyel başlangıç noktasına geç
-        current_position += 1;
+        current_position += NEXT_MQ_STEP;
     }
     return NULL;
 }
@@ -574,7 +569,7 @@ MessageQueueHeader* find_mq_header_by_name(const char* mqname) {
         if (strncmp(mqHeader->mq_name, mqname, MAX_MQNAMESIZE) == 0 && strcmp(mqHeader->mq_signature, "mq_signature") == 0) {
             return mqHeader; 
         }
-        current_position += 1;
+        current_position += NEXT_MQ_STEP;
     }
     return NULL;
 }
