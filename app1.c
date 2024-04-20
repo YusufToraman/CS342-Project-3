@@ -136,6 +136,7 @@ void test_messageflow_4p2mq()
     ret1 = fork();
     if (ret1 == 0) {
         printf("\nChild 2\n");
+        mf_print();
         // P2
         // P2 will receive
         srand(time(0));
@@ -178,6 +179,7 @@ void test_messageflow_4p2mq()
     ret1 = fork();
     if (ret1 == 0) {
         printf("\nChild 4\n");
+        mf_print();
         // P4
         // P4 will receive
         srand(time(0));
@@ -195,10 +197,11 @@ void test_messageflow_4p2mq()
     }
     for (i = 0; i < 4; ++i)
         wait(NULL);
+
+    mf_print();
     
     mf_remove("mq1");
     mf_remove("mq2");
-    mf_disconnect();
 
     mf_disconnect();
 }

@@ -165,8 +165,20 @@ int mf_init() {
     FixedPortion* fixedPortion = (FixedPortion*)shmem;
     fixedPortion->config = config;
     fixedPortion->mq_count = 0; 
-    fixedPortion->unique_id = 1;  
+    fixedPortion->unique_id = 1;
+
+    for (int i = 0; i < MAX_PROCESSES; i++) {
+        fixedPortion->active_processes[i] = -1;
+    } 
+
+    pthread_mutexattr_t attr;
+    pthread_mutexattr_init(&attr);
+    pthread_mutexattr_setpshared(&attr, PTHREAD_PROCESS_SHARED);
+    pthread_mutex_init(&fixedPortion->process_mutex, &attr);
+    pthread_mutexattr_destroy(&attr);
+
     initialize_hole_manager(fixedPortion, config.shmem_size);
+
     return MF_SUCCESS;
 }
 
@@ -174,6 +186,7 @@ int mf_init() {
 int mf_destroy() {
     if (shmem != NULL) {
         FixedPortion* fixedPortion = (FixedPortion*)shmem;
+        pthread_mutex_destroy(&fixedPortion->process_mutex);
         
         char shmemName[MAXFILENAME];
         strncpy(shmemName, fixedPortion->config.shmem_name, MAXFILENAME);
@@ -184,6 +197,9 @@ int mf_destroy() {
         if (shmemName[0] != '\0') {
             shm_unlink(shmemName);
         }
+
+        printf("Closing the Library\n");
+
     }
     return MF_SUCCESS;
 }
@@ -204,6 +220,28 @@ int mf_connect() {
         close(shm_fd);
         return MF_ERROR;
     }
+
+    FixedPortion* fixedPortion = (FixedPortion*)shmem;
+    pthread_mutex_lock(&fixedPortion->process_mutex);
+    int slot = -1;
+    for (int i = 0; i < MAX_PROCESSES; i++) {
+        if (fixedPortion->active_processes[i] == -1) {
+            fixedPortion->active_processes[i] = getpid();
+            slot = i;
+            break;
+        }
+    }
+    pthread_mutex_unlock(&fixedPortion->process_mutex);
+
+    if (slot == -1) {
+        fprintf(stderr, "Error: Max available process count at a time is 16.\n");
+        if (munmap(shmem, fixedPortion->config.shmem_size) == -1) {
+            perror("Error unmapping shared memory");
+            return MF_ERROR;
+        }
+        return MF_ERROR;
+    }
+
     close(shm_fd);
     return MF_SUCCESS;
 }
@@ -211,6 +249,23 @@ int mf_connect() {
    
 int mf_disconnect() {
     FixedPortion* fixedPortion = (FixedPortion*)shmem;
+
+    pthread_mutex_lock(&fixedPortion->process_mutex);
+    pid_t current_pid = getpid();
+    int found = 0;
+    for (int i = 0; i < MAX_PROCESSES; i++) {
+        if (fixedPortion->active_processes[i] == current_pid) {
+            fixedPortion->active_processes[i] = -1;
+            found = 1;
+            break;
+        }
+    }
+    pthread_mutex_unlock(&fixedPortion->process_mutex);
+
+    if (!found) {
+        fprintf(stderr, "Error: Process ID not found in active processes.\n");
+        return MF_ERROR; 
+    }
 
     if (shmem != NULL) {
         if (munmap(shmem, fixedPortion->config.shmem_size) == -1) {
@@ -461,6 +516,18 @@ int mf_print() {
     printf("Max Message Queues: %d\n", fixedPortion->config.max_queues_in_shmem);
     printf("Max Messages in Queue: %d\n", fixedPortion->config.max_msgs_in_queue);
     printf("Current Message Queue Count: %d\n", fixedPortion->mq_count);
+    printf("\033[35mActive Processes:\n\033[0m");
+    int active_process_found = 0;
+    for (int i = 0; i < MAX_PROCESSES; i++) {
+        if (fixedPortion->active_processes[i] != -1) {
+            printf("[%d]: %d\n", i, fixedPortion->active_processes[i]);
+            active_process_found = 1;
+        }
+    }
+
+    if (!active_process_found) {
+        printf("No active processes.\n");
+    }
 
     char* current_position = (char*)shmem + sizeof(FixedPortion);
     char* end_of_shmem = (char*)shmem + fixedPortion->config.shmem_size;
